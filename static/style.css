@@ -1,0 +1,153 @@
+* { box-sizing: border-box; }
+
+body {
+  font-family: "Segoe UI", Roboto, sans-serif;
+  margin: 0;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  background: #f4f6f8;
+}
+
+/* HEADER (filtres) */
+header {
+  background: #2b7de9;
+  color: white;
+  padding: 1rem 2rem;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+}
+
+header h1 {
+  font-size: 1.4rem;
+  margin-right: 1rem;
+}
+
+.filters {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.filters input {
+  padding: 0.6rem 1rem;
+  border: none;
+  border-radius: 20px;
+  min-width: 240px;
+}
+
+.filters button {
+  background: #1976d2;
+  color: white;
+  border: none;
+  border-radius: 20px;
+  padding: 0.6rem 1rem;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.filters button:hover {
+  background: #125ea6;
+}
+
+.filters button.active {
+  background: #0d47a1;
+}
+
+/* LAYOUT PRINCIPAL */
+main {
+  display: flex;
+  flex: 1;
+  height: calc(100vh - 70px);
+}
+
+#map {
+  flex: 1;
+}
+
+/* PANNEAU LATÉRAL */
+#sidebar {
+  width: 350px;
+  background: white;
+  box-shadow: -2px 0 8px rgba(0,0,0,0.1);
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+}
+
+#sidebar h2 {
+  padding: 1rem;
+  background: #e9f0fb;
+  border-bottom: 1px solid #ccc;
+  margin: 0;
+}
+
+#stationList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+#stationList li {
+  padding: 0.8rem 1rem;
+  border-bottom: 1px solid #eee;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+#stationList li:hover {
+  background: #f5f8fd;
+}
+
+#stationList li.active {
+  background: #dce7fb;
+}
+
+/* GRAPHIQUE */
+#chartSection {
+  padding: 1rem;
+  border-top: 1px solid #ccc;
+  height: 50%;
+}
+
+#availabilityChart {
+  width: 100%;
+  height: 250px;
+}
+
+/* LOADER */
+.loader {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  background: white;
+  padding: 1rem 2rem;
+  border-radius: 8px;
+  box-shadow: 0 2px 6px rgba(0,0,0,0.2);
+  display: none;
+  z-index: 999;
+}
+
+#filters {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  justify-content: center;
+  background-color: #fff;
+  padding: 10px;
+  border-radius: 10px;
+  box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+  position: fixed;
+  top: 10px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 1000;
+}
+
+#filters select, #filters input {
+  padding: 6px;
+  border-radius: 5px;
+  border: 1px solid #ccc;
+}

@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Vélib’ Dashboard</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
+  <!-- Ajouter dans index.html -->
+<link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster/dist/MarkerCluster.css" />
+<link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster/dist/MarkerCluster.Default.css" />
+<script src="https://unpkg.com/leaflet.markercluster/dist/leaflet.markercluster.js"></script>
+
+  <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+
+<body>
+  <!-- BARRE DE FILTRES -->
+  <header>
+    <h1>🚲 Vélib’ Dashboard</h1>
+    <div class="filters">
+      <input type="text" id="address" placeholder="Rechercher une adresse..." />
+      <button onclick="searchAddress()">Rechercher</button>
+      <button id="modeBikes" class="active" onclick="setMode('bikes')">🚲 Vélos</button>
+      <button id="modeDocks" onclick="setMode('docks')">🅿️ Bornes</button>
+  <input type="number" id="minBikes" placeholder="Min vélos">
+  <input type="number" id="minDocks" placeholder="Min bornes">
+   <select id="arrondissement">
+    <option value="">Tous les arrondissements</option>
+    <option value="1er">1er arrondissement</option>
+    <option value="2e">2e arrondissement</option>
+    <option value="3e">3e arrondissement</option>
+    <option value="4e">4e arrondissement</option>
+    <option value="5e">5e arrondissement</option>
+    <option value="6e">6e arrondissement</option>
+    <option value="7e">7e arrondissement</option>
+    <option value="8e">8e arrondissement</option>
+    <option value="9e">9e arrondissement</option>
+    <option value="10e">10e arrondissement</option>
+    <option value="11e">11e arrondissement</option>
+    <option value="12e">12e arrondissement</option>
+    <option value="13e">13e arrondissement</option>
+    <option value="14e">14e arrondissement</option>
+    <option value="15e">15e arrondissement</option>
+    <option value="16e">16e arrondissement</option>
+    <option value="17e">17e arrondissement</option>
+    <option value="18e">18e arrondissement</option>
+    <option value="19e">19e arrondissement</option>
+    <option value="20e">20e arrondissement</option>
+  </select>
+
+    <button id="applyFilters" onclick="loadStations()">Filtrer</button>
+<button id="resetFilters">🧹 Réinitialiser</button>
+
+</div>
+<div id="loader" style="display:none;">⏳ Chargement...</div>
+  </header>
+
+
+  <!-- CONTENU PRINCIPAL -->
+  <main>
+    <div id="map"></div>
+    <aside id="sidebar">
+      <h2 id="sidebarTitle">Stations à proximité</h2>
+      <ul id="stationList"></ul>
+
+      <div id="chartSection">
+        <canvas id="availabilityChart"></canvas>
+      </div>
+    </aside>
+  </main>
+
+  <div class="loader" id="loader">Chargement...</div>
+  <script src="{{ url_for('static', filename='app.js') }}"></script>
+</body>
+</html>
