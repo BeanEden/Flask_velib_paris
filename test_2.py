@@ -7,11 +7,11 @@ from pymongo.errors import ConnectionFailure, OperationFailure
 # Configuration
 STATION_INFO_URL = "https://velib-metropole-opendata.smovengo.cloud/opendata/Velib_Metropole/station_information.json"
 STATION_STATUS_URL = "https://velib-metropole-opendata.smovengo.cloud/opendata/Velib_Metropole/station_status.json"
-MONGO_URI = "mongodb://localhost:27017/"  # À adapter selon votre configuration
+MONGO_URI = "mongodb://mongo:27017/"  # À adapter selon votre configuration
 DB_NAME = "velib_data"
 COLLECTION_INFO = "station"
 COLLECTION_STATUS = "status"
-UPDATE_INTERVAL = 60  # secondes
+UPDATE_INTERVAL = 3600  # secondes
 
 def connect_mongodb():
     """Connexion à MongoDB"""

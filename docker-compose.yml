@@ -1,36 +1,26 @@
-version: '3.8'
+version: '3.9'
 
 services:
+  web:
+    build: .
+    container_name: velib_flask
+    ports:
+      - "5000:5000"
+    volumes:
+      - .:/app
+    depends_on:
+      - mongo
+    environment:
+      - MONGO_URI=mongodb://mongo:27017/velib_data
+
   mongo:
-    image: mongo:6
+    image: mongo:6.0
     container_name: velib_mongo
-    restart: always
+    restart: unless-stopped
     ports:
       - "27017:27017"
     volumes:
       - mongo_data:/data/db
-
-  web:
-    build: .
-    container_name: velib_web
-    restart: always
-    ports:
-      - "5000:5000"
-    environment:
-      - MONGO_URI=mongodb://mongo:27017/
-    depends_on:
-      - mongo
-
-  collector:
-    build: .
-    container_name: velib_collector
-    command: ["python", "velib_to_mongo.py"]
-    restart: always
-    environment:
-      - MONGO_URI=mongodb://mongo:27017/
-      - INTERVAL=60
-    depends_on:
-      - mongo
 
 volumes:
   mongo_data:

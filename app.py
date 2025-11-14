@@ -3,11 +3,13 @@ from math import radians, cos, sin, asin, sqrt
 from pymongo import MongoClient
 from datetime import datetime, timedelta
 from bson import ObjectId
+import os
+
 
 app = Flask(__name__)
 
 # MongoDB
-MONGO_URI = "mongodb://localhost:27017/"
+MONGO_URI = os.getenv("MONGO_URI")
 DB_NAME = "velib_data"
 COLLECTION_INFO = "station"
 COLLECTION_STATUS = "status"
@@ -154,5 +156,35 @@ def station_chart():
     chart_data = sorted(chart_data, key=lambda x: x["hour"])
     return jsonify(chart_data)
 
+
+@app.route("/hourly_data")
+def hourly_data():
+    """
+    Retourne les moyennes horaires pour toutes les stations ou une station spécifique.
+    """
+    mode = request.args.get("mode", "bikes")
+    station_id = request.args.get("station_id")
+
+    # Récupération des statuts
+    statuses = list(db[COLLECTION_STATUS].find({}))
+    if station_id:
+        statuses = [s for s in statuses if s["station_id"] == station_id]
+
+    # Calcul par heure
+    hourly = {}
+    for s in statuses:
+        hour = s["timestamp"].hour
+        value = s.get("num_bikes_available" if mode == "bikes" else "num_docks_available", 0)
+        hourly.setdefault(hour, []).append(value)
+
+    # Moyenne par heure
+    data = [{"hour": h, "avg": sum(vals)/len(vals)} for h, vals in sorted(hourly.items())]
+
+    return jsonify(data)
+
+
+
 if __name__ == "__main__":
-    app.run(debug=True)
+    from os import getenv
+    app.run(host="0.0.0.0", port=int(getenv("PORT", 5000)), debug=True)
+
