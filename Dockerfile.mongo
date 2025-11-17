@@ -1,0 +1,14 @@
+# Dockerfile.mongo
+FROM mongo:7
+
+# Copier les scripts d'initialisation
+COPY init-scripts/ /docker-entrypoint-initdb.d/
+
+# S'assurer que les scripts sont exécutables
+RUN chmod +x /docker-entrypoint-initdb.d/*.sh
+
+# Entrypoint : on garde l'entrypoint officiel mais on lance nos scripts après
+ENTRYPOINT ["docker-entrypoint.sh"]
+
+# Commande par défaut
+CMD ["mongod"]
