@@ -1,82 +1,78 @@
-version: "3.9"
+version: '3.8'
+
 services:
 
-  # Config servers
-  configsvr1:
+  # -----------------------
+  # CONFIG SERVERS (replSet cfgRepl)
+  # -----------------------
+  configsvr:
     image: mongo:7
-    container_name: configsvr1
-    command: ["mongod", "--configsvr", "--replSet", "cfg", "--port", "27017"]
+    command: [
+      "mongod",
+      "--configsvr",
+      "--replSet=cfgRepl",
+      "--port=27019",
+      "--bind_ip=0.0.0.0"
+    ]
     volumes:
-      - ./init-scripts:/docker-entrypoint-initdb.d
-    ports:
-      - "27101:27017"
+      - configdb:/data/configdb
 
-  configsvr2:
+  # -----------------------
+  # SHARD 1
+  # -----------------------
+  shard1:
     image: mongo:7
-    command: ["mongod", "--configsvr", "--replSet", "cfg", "--port", "27017"]
-    ports:
-      - "27102:27017"
-
-  configsvr3:
-    image: mongo:7
-    command: ["mongod", "--configsvr", "--replSet", "cfg", "--port", "27017"]
-    ports:
-      - "27103:27017"
-
-  # Shards
-  shard1a:
-    image: mongo:7
-    command: ["mongod", "--shardsvr", "--replSet", "shard1", "--port", "27017"]
+    command: [
+      "mongod",
+      "--shardsvr",
+      "--replSet=shard1",
+      "--port=27018",
+      "--bind_ip=0.0.0.0"
+    ]
     volumes:
-      - ./init-scripts:/docker-entrypoint-initdb.d
-    ports:
-      - "27111:27017"
+      - shard1:/data/db
 
-  shard2a:
+  # -----------------------
+  # SHARD 2
+  # -----------------------
+  shard2:
     image: mongo:7
-    command: ["mongod", "--shardsvr", "--replSet", "shard2", "--port", "27017"]
+    command: [
+      "mongod",
+      "--shardsvr",
+      "--replSet=shard2",
+      "--port=27020",
+      "--bind_ip=0.0.0.0"
+    ]
     volumes:
-      - ./init-scripts:/docker-entrypoint-initdb.d
-    ports:
-      - "27121:27017"
+      - shard2:/data/db
 
-  # Mongos router
+  # -----------------------
+  # MONGOS (router)
+  # -----------------------
   mongos:
     image: mongo:7
-    container_name: mongos
+    depends_on:
+      - configsvr
+      - shard1
+      - shard2
     command: >
-      mongos --configdb cfg/configsvr1:27017,configsvr2:27017,configsvr3:27017 --bind_ip_all
+      mongos --configdb cfgRepl/configsvr:27019 --bind_ip_all
     ports:
       - "27017:27017"
+
+  # -----------------------
+  # INIT SCRIPT
+  # -----------------------
+  mongo-setup:
+    image: mongo:7
     depends_on:
-      - configsvr1
-      - configsvr2
-      - configsvr3
-      - shard1a
-      - shard2a
+      - mongos
     volumes:
-      - ./init-scripts:/docker-entrypoint-initdb.d
+      - ./mongo-init:/mongo-init
+    entrypoint: ["/bin/bash", "/mongo-init/mongo-setup.sh"]
 
-  # Flask
-  web:
-    build:
-      context: .
-      dockerfile: Dockerfile.flask
-    container_name: velib_flask
-    ports:
-      - "5000:5000"
-    environment:
-      - MONGO_URI=mongodb://mongos:27017/velib_data
-    depends_on:
-      - mongos
-
-  # Python script de récupération Vélib'
-  velib_sync:
-    build:
-      context: .
-      dockerfile: Dockerfile.python
-    container_name: velib_sync
-    environment:
-      - MONGO_URI=mongodb://mongos:27017/velib_data
-    depends_on:
-      - mongos
+volumes:
+  configdb:
+  shard1:
+  shard2:
