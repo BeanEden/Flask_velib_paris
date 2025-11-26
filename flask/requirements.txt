@@ -1,0 +1,7 @@
+Flask==2.3.3
+pymongo==4.4
+requests
+joblib
+geopy
+gpxpy
+Werkzeug==2.3.7

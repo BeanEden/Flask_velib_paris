@@ -1,78 +1,113 @@
-version: '3.8'
+version: "3.8"
 
 services:
-
-  # -----------------------
-  # CONFIG SERVERS (replSet cfgRepl)
-  # -----------------------
+  # CONFIG SERVER (configsvr)
   configsvr:
-    image: mongo:7
-    command: [
-      "mongod",
-      "--configsvr",
-      "--replSet=cfgRepl",
-      "--port=27019",
-      "--bind_ip=0.0.0.0"
-    ]
+    image: mongo:6
+    command: ["mongod", "--configsvr", "--replSet", "rsConfig", "--port", "27019", "--bind_ip_all"]
+    ports:
+      - "27019:27019"
     volumes:
-      - configdb:/data/configdb
+      - configdb:/data/db
+    networks:
+      - mongo-cluster
 
-  # -----------------------
-  # SHARD 1
-  # -----------------------
+  # SHARD 1 (rsShard1)
   shard1:
-    image: mongo:7
-    command: [
-      "mongod",
-      "--shardsvr",
-      "--replSet=shard1",
-      "--port=27018",
-      "--bind_ip=0.0.0.0"
-    ]
+    image: mongo:6
+    command: ["mongod", "--shardsvr", "--replSet", "rsShard1", "--port", "27018", "--bind_ip_all"]
+    ports:
+      - "27018:27018"
     volumes:
-      - shard1:/data/db
+      - shard1db:/data/db
+    networks:
+      - mongo-cluster
 
-  # -----------------------
-  # SHARD 2
-  # -----------------------
+  # SHARD 2 (rsShard2)
   shard2:
-    image: mongo:7
-    command: [
-      "mongod",
-      "--shardsvr",
-      "--replSet=shard2",
-      "--port=27020",
-      "--bind_ip=0.0.0.0"
-    ]
+    image: mongo:6
+    command: ["mongod", "--shardsvr", "--replSet", "rsShard2", "--port", "27020", "--bind_ip_all"]
+    ports:
+      - "27020:27020"
     volumes:
-      - shard2:/data/db
+      - shard2db:/data/db
+    networks:
+      - mongo-cluster
 
-  # -----------------------
   # MONGOS (router)
-  # -----------------------
   mongos:
-    image: mongo:7
+    image: mongo:6
     depends_on:
       - configsvr
       - shard1
       - shard2
     command: >
-      mongos --configdb cfgRepl/configsvr:27019 --bind_ip_all
+      bash -c "sleep 5 && mongos --configdb rsConfig/configsvr:27019 --bind_ip_all --port 27017"
     ports:
       - "27017:27017"
+    networks:
+      - mongo-cluster
 
-  # -----------------------
-  # INIT SCRIPT
-  # -----------------------
+  # INIT: configure replica sets + add shards + enable sharding
   mongo-setup:
-    image: mongo:7
+    image: mongo:6
     depends_on:
       - mongos
     volumes:
-      - ./mongo-init:/mongo-init
-    entrypoint: ["/bin/bash", "/mongo-init/mongo-setup.sh"]
+      - ./mongo-init:/mongo-init:ro
+    entrypoint: ["/bin/sh", "/mongo-init/mongo-setup.sh"]
+    networks:
+      - mongo-cluster
+
+  # FLASK app
+  flask:
+    build: ./flask
+    depends_on:
+      - mongos
+    environment:
+      - MONGO_URI=mongodb://mongos:27017/velib
+      - OPENWEATHER_API_KEY=${OPENWEATHER_API_KEY:-}
+    ports:
+      - "5000:5000"
+    volumes:
+      - ./flask:/app
+      - ./models:/models
+    networks:
+      - mongo-cluster
+
+  # SCRAPER (insère des données de test)
+  scraper:
+    build: ./scraper
+    depends_on:
+      - mongos
+    environment:
+      - MONGO_URI=mongodb://mongos:27017/velib
+      - OPENWEATHER_API_KEY=${OPENWEATHER_API_KEY:-}
+    volumes:
+      - ./scraper:/app
+    networks:
+      - mongo-cluster
+
+  # TRAINER (optionnel - active si tu veux entraînement automatique)
+  trainer:
+    build: ./trainer
+    depends_on:
+      - mongos
+    environment:
+      - MONGO_URI=mongodb://mongos:27017/velib
+    volumes:
+      - ./models:/models
+    networks:
+      - mongo-cluster
+    # décommente pour ne lancer qu'une fois puis s'arrêter :
+    # restart: "no"
+
 
 volumes:
   configdb:
-  shard1:
-  shard2:
+  shard1db:
+  shard2db:
+
+networks:
+  mongo-cluster:
+    driver: bridge

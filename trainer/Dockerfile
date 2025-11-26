@@ -1,10 +1,9 @@
-FROM python:3.12-slim
-
+FROM python:3.11-slim
 WORKDIR /app
 
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY velib_sync.py .
+COPY train.py .
 
-CMD ["python", "velib_sync.py"]
+CMD ["python", "train.py"]
