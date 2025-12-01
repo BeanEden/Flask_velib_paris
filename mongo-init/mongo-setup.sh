@@ -1,48 +1,46 @@
-#!/bin/sh
+#!/bin/bash
 set -e
-echo "[setup] waiting a bit for mongod services..."
-sleep 6
 
-# helper: use mongosh if present, else mongo
-run_shell() {
-  if command -v mongosh >/dev/null 2>&1; then
-    mongosh -- "$@"
-  else
-    mongo -- "$@"
-  fi
+echo "################################################"
+echo "##     INITIALISATION DU CLUSTER MONGODB      ##"
+echo "################################################"
+
+# Fonction simple pour attendre qu'un serveur réponde
+wait_for_host() {
+    echo "⏳ En attente de $1:$2..."
+    until mongosh --host $1 --port $2 --eval "print('alive')" > /dev/null 2>&1; do
+        sleep 2
+    done
+    echo "✅ $1:$2 est en ligne."
 }
 
-echo "[setup] initiate config replica set (rsConfig)..."
-run_shell --host configsvr --port 27019 <<'EOF'
-rs.initiate({_id:"rsConfig", configsvr:true, members:[{_id:0, host:"configsvr:27019"}]})
-EOF
+# 1. On attend et on initie le Config Server
+wait_for_host configsvr 27019
+echo "⚙️  Configuration du Config Server..."
+mongosh --host configsvr --port 27019 --eval 'rs.initiate({_id:"rsConfig", configsvr:true, members:[{_id:0, host:"configsvr:27019"}]})'
 
-sleep 4
+# 2. On attend et on initie le Shard 1
+wait_for_host shard1 27018
+echo "⚙️  Configuration du Shard 1..."
+mongosh --host shard1 --port 27018 --eval 'rs.initiate({_id:"rsShard1", members:[{_id:0, host:"shard1:27018"}]})'
 
-echo "[setup] initiate rsShard1..."
-run_shell --host shard1 --port 27018 <<'EOF'
-rs.initiate({_id:"rsShard1", members:[{_id:0, host:"shard1:27018"}]})
-EOF
+# 3. On attend et on initie le Shard 2
+wait_for_host shard2 27020
+echo "⚙️  Configuration du Shard 2..."
+mongosh --host shard2 --port 27020 --eval 'rs.initiate({_id:"rsShard2", members:[{_id:0, host:"shard2:27020"}]})'
 
-echo "[setup] initiate rsShard2..."
-run_shell --host shard2 --port 27020 <<'EOF'
-rs.initiate({_id:"rsShard2", members:[{_id:0, host:"shard2:27020"}]})
-EOF
-
-sleep 4
-
-echo "[setup] add shards via mongos..."
-run_shell --host mongos --port 27017 <<'EOF'
+# 4. On configure le Routeur (Mongos)
+# Le mongos a besoin que le configsvr soit prêt avant de démarrer.
+# On attend que le mongos soit up (grâce au depends_on du docker-compose, il devrait arriver)
+wait_for_host mongos 27017
+echo "🔗 Liaison des shards au Routeur..."
+mongosh --host mongos --port 27017 <<EOF
 sh.addShard("rsShard1/shard1:27018")
 sh.addShard("rsShard2/shard2:27020")
-sh.status()
-EOF
-
-echo "[setup] enable sharding for velib and shard stations on station_id hashed..."
-run_shell --host mongos --port 27017 <<'EOF'
 sh.enableSharding("velib")
 sh.shardCollection("velib.stations", { station_id: "hashed" })
-sh.status()
 EOF
 
-echo "[setup] done."
+echo "################################################"
+echo "##          INSTALLATION TERMINÉE             ##"
+echo "################################################"

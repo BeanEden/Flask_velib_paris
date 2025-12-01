@@ -3,6 +3,7 @@ import time
 from datetime import datetime
 from pymongo import MongoClient, errors
 import os
+import sys
 
 # -------------------------------
 # CONFIGURATION
@@ -10,16 +11,18 @@ import os
 STATION_INFO_URL = "https://velib-metropole-opendata.smovengo.cloud/opendata/Velib_Metropole/station_information.json"
 STATION_STATUS_URL = "https://velib-metropole-opendata.smovengo.cloud/opendata/Velib_Metropole/station_status.json"
 
-# Choisir URI selon contexte :
-# - depuis Docker Compose : mongodb://mongos:27017/velib_data
-# - depuis local : mongodb://localhost:27017/velib_data
-MONGO_URI = os.getenv("MONGO_URI", "mongodb://localhost:27017/velib_data")
+# L'URI vient du docker-compose (mongodb://mongos:27017/velib)
+MONGO_URI = os.getenv("MONGO_URI", "mongodb://localhost:27017/velib")
 
-DB_NAME = "velib_data"
-COLLECTION_INFO = "station"
+# CORRECTION 1 : Alignement avec le script mongo-setup.sh
+DB_NAME = "velib" 
+
+# CORRECTION 2 : Alignement avec la collection shardée
+COLLECTION_INFO = "stations"
 COLLECTION_STATUS = "status"
-UPDATE_INTERVAL = 3600  # secondes
-MAX_RETRIES = 5  # retry MongoDB
+
+UPDATE_INTERVAL = 3600  # 1 heure
+MAX_RETRIES = 5
 
 # -------------------------------
 # FONCTIONS
@@ -28,14 +31,17 @@ def connect_mongodb(uri, retries=MAX_RETRIES, wait=5):
     """Connexion à MongoDB avec retry"""
     for attempt in range(1, retries+1):
         try:
+            # On se connecte
             client = MongoClient(uri, serverSelectionTimeoutMS=5000)
+            # On teste la commande ping
             client.admin.command("ping")
-            print(f"✓ Connexion MongoDB établie ({uri})")
+            print(f"✓ Connexion réussie au cluster MongoDB (via {uri})")
             return client
         except errors.ConnectionFailure as e:
-            print(f"⚠ MongoDB non disponible, tentative {attempt}/{retries}: {e}")
+            print(f"⚠ MongoDB non dispo (Tentative {attempt}/{retries})...")
             time.sleep(wait)
-    print("✗ Impossible de se connecter à MongoDB après plusieurs tentatives")
+    
+    print("✗ ERREUR CRITIQUE : Impossible de joindre le Mongos.")
     return None
 
 def fetch_velib_data(url, data_type):
@@ -44,48 +50,58 @@ def fetch_velib_data(url, data_type):
         resp = requests.get(url, timeout=10)
         resp.raise_for_status()
         data = resp.json()
-        stations_count = len(data.get("data", {}).get("stations", []))
-        print(f"✓ {data_type} récupérées ({stations_count} stations)")
+        # Petite sécurité : vérifie que 'data' existe
+        stations = data.get("data", {}).get("stations", [])
+        print(f"✓ API : {len(stations)} {data_type} téléchargées.")
         return data
     except requests.RequestException as e:
-        print(f"✗ Erreur récupération {data_type}: {e}")
+        print(f"✗ Erreur API ({data_type}): {e}")
         return None
 
 def save_to_mongodb(db, data, collection_name, data_type):
-    """Insertion dans MongoDB avec timestamp et historique"""
-    if not data or "data" not in data:
-        print(f"⚠ Données {data_type} invalides")
+    """Insertion dans MongoDB"""
+    if not data or "data" not in data or "stations" not in data["data"]:
+        print(f"⚠ Données {data_type} vides ou malformées.")
         return False
 
     collection = db[collection_name]
     timestamp = datetime.utcnow()
     stations = data["data"]["stations"]
 
+    # Préparation des données
     for station in stations:
-        station["timestamp"] = timestamp
-        station["last_updated_api"] = data.get("last_updated", timestamp)
+        station["scrape_timestamp"] = timestamp
+        station["api_last_updated"] = data.get("last_updated")
+        
+        # Sécurité pour le Sharding : on s'assure que station_id existe
+        # (L'API Velib utilise souvent 'station_id' ou 'stationCode')
+        if "station_id" not in station and "stationCode" in station:
+             station["station_id"] = station["stationCode"]
 
     if stations:
         try:
+            # Insert Many est très performant pour du chargement en masse
             result = collection.insert_many(stations)
-            print(f"✓ {len(result.inserted_ids)} enregistrements {data_type} insérés à {timestamp}")
+            print(f"💾 DB : {len(result.inserted_ids)} documents insérés dans '{DB_NAME}.{collection_name}'.")
             return True
         except errors.PyMongoError as e:
-            print(f"✗ Erreur insertion {data_type}: {e}")
+            print(f"✗ Erreur Mongo ({data_type}): {e}")
             return False
-    else:
-        print(f"⚠ Aucune station à insérer pour {data_type}")
-        return False
+    return False
 
 # -------------------------------
-# SCRIPT PRINCIPAL
+# MAIN
 # -------------------------------
 def main():
-    print("=== Démarrage synchronisation Vélib' → MongoDB ===\n")
+    # Force le flush pour voir les logs dans Docker instantanément
+    sys.stdout.reconfigure(line_buffering=True)
     
+    print("=== SCRAPER VÉLIB DÉMARRÉ ===")
+    print(f"Cible : {MONGO_URI} | DB : {DB_NAME}")
+
     client = connect_mongodb(MONGO_URI)
     if not client:
-        return
+        exit(1)
 
     db = client[DB_NAME]
 
@@ -93,27 +109,28 @@ def main():
     try:
         while True:
             iteration += 1
-            print(f"--- Itération #{iteration} ---")
+            print(f"\n--- Cycle #{iteration} : {datetime.now().strftime('%H:%M:%S')} ---")
             
-            info_data = fetch_velib_data(STATION_INFO_URL, "Informations stations")
+            # 1. Infos statiques (Nom, Lat, Lon)
+            # Note: Idéalement on ne devrait pas insérer ça en boucle car ça change peu,
+            # mais pour ce TP c'est très bien (ça génère du volume).
+            info_data = fetch_velib_data(STATION_INFO_URL, "stations")
             if info_data:
-                save_to_mongodb(db, info_data, COLLECTION_INFO, "informations")
+                save_to_mongodb(db, info_data, COLLECTION_INFO, "stations")
 
-            status_data = fetch_velib_data(STATION_STATUS_URL, "Statut stations")
+            # 2. Status dynamique (Vélos dispos)
+            status_data = fetch_velib_data(STATION_STATUS_URL, "status")
             if status_data:
-                save_to_mongodb(db, status_data, COLLECTION_STATUS, "statuts")
+                save_to_mongodb(db, status_data, COLLECTION_STATUS, "status")
 
-            print(f"⏳ Prochaine mise à jour dans {UPDATE_INTERVAL} secondes...\n")
+            print(f"💤 Pause de {UPDATE_INTERVAL} secondes...")
             time.sleep(UPDATE_INTERVAL)
 
     except KeyboardInterrupt:
-        print("\n=== Arrêt du programme ===")
+        print("\n=== Arrêt demandé ===")
     finally:
         client.close()
-        print("Connexion MongoDB fermée")
+        print("Bye.")
 
-# -------------------------------
-# LANCEMENT
-# -------------------------------
 if __name__ == "__main__":
     main()

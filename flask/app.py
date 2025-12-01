@@ -1,129 +1,122 @@
-import os, datetime, json
-from flask import Flask, request, jsonify, render_template
+import os
+from flask import Flask, render_template
 from pymongo import MongoClient
-import requests
-from joblib import load
-from geopy.distance import geodesic
-
-MONGO_URI = os.getenv("MONGO_URI","mongodb://localhost:27017/velib")
-client = MongoClient(MONGO_URI)
-db = client.velib
-stations = db.stations
+from datetime import datetime, timezone
 
 app = Flask(__name__)
 
-# helper: get weather (current) via OpenWeatherMap
-def get_weather(lat, lon):
-    key = os.getenv("OPENWEATHER_API_KEY")
-    if not key: return {}
-    r = requests.get("https://api.openweathermap.org/data/2.5/weather",
-                     params={"lat":lat,"lon":lon,"appid":key,"units":"metric"})
-    return r.json()
+# Configuration (identique au scraper)
+# On passe par le routeur (mongos) pour avoir accès à tout le cluster
+MONGO_URI = os.getenv("MONGO_URI", "mongodb://mongos:27017/velib")
+client = MongoClient(MONGO_URI)
+db = client['velib']  # La base qu'on a créée ensemble
 
-@app.route("/")
-def index():
-    return render_template("index.html")
 
-@app.route("/ingest/station", methods=["POST"])
-def ingest_station():
-    payload = request.get_json()
-    # payload example: { "station_id":123, "capacity":20, "lat":..., "lon":..., "ts":"2025-11-17T12:00:00Z", "available":5 }
-    payload["ts"] = payload.get("ts", datetime.datetime.utcnow().isoformat())
-    stations.insert_one(payload)
-    return jsonify({"status":"ok"}), 201
-
-@app.route("/predict", methods=["GET"])
-def predict():
-    # query params: station_id, date (YYYY-MM-DD), hour (0-23)
-    station_id = int(request.args["station_id"])
-    date = request.args.get("date")
-    hour = int(request.args.get("hour", datetime.datetime.utcnow().hour))
-    # For demo: load a pre-trained model if exists
+def get_shard_stats():
+    """
+    Exécute la commande administrative 'collStats' pour obtenir
+    la répartition précise des données sur les shards.
+    """
     try:
-        model = load("model.joblib")
-    except:
-        return jsonify({"error":"model not available"}), 400
-    # build feature vector minimal for demo (in real: comprehensive features)
-    # fetch station metadata
-    st = stations.find_one({"station_id":station_id}, sort=[("ts",-1)])
-    if not st:
-        return jsonify({"error":"station not found"}), 404
-    # naive features
-    feat = {
-      "heure": hour,
-      "jour_semaine": datetime.datetime.fromisoformat(date).weekday() if date else datetime.datetime.utcnow().weekday(),
-      "capacite": st.get("capacity", st.get("capacite",20)),
-      "lat": st.get("lat") or st.get("latitude"),
-      "lon": st.get("lon") or st.get("longitude")
-    }
-    # convert to vector (must match training)
-    X = [[feat["heure"], feat["jour_semaine"], feat["capacite"]]]
-    pred = model.predict(X)[0]
-    return jsonify({"station_id": station_id, "pred": float(pred)})
+        stats = db.command("collStats", "stations")
+        shards_data = stats.get('shards', {})
+        
+        labels = []
+        counts = []
+        sizes = []
+        
+        for shard_name, shard_info in shards_data.items():
+            labels.append(shard_name)
+            counts.append(shard_info.get('count', 0))
+            sizes.append(round(shard_info.get('size', 0) / 1024, 2)) 
+            
+        return {
+            "labels": labels,
+            "counts": counts,
+            "sizes": sizes,
+            "total_count": stats.get('count', 0),
+            "total_size": round(stats.get('size', 0) / 1024, 2),
+            "avg_obj_size": stats.get('avgObjSize', 0)
+        }
+    except Exception as e:
+        print(f"Erreur stats shards: {e}")
+        return {
+            "labels": [], "counts": [], "sizes": [], 
+            "total_count": 0, "total_size": 0, "avg_obj_size": 0
+        }
 
-@app.route("/recommend", methods=["POST"])
-def recommend():
-    data = request.get_json()
-    user = tuple(data["user"])  # [lat,lon]
-    dest = tuple(data["dest"])
-    radius = data.get("radius_m", 500)
-    # find candidate stations within radius (approx)
-    candidates = []
-    for s in stations.find():
-        s_loc = (s.get("lat") or s.get("latitude"), s.get("lon") or s.get("longitude"))
-        if None in s_loc: continue
-        dist = geodesic(user, s_loc).meters
-        if dist <= radius:
-            candidates.append((s, dist))
-    if not candidates: return jsonify({"error":"no_station"}), 404
-    # scoring simple: predicted availability (if model exists) else current available / capacity
-    try:
-        model = load("model.joblib")
-    except:
-        model = None
-    scored = []
-    for s, dist in candidates:
-        if model:
-            pred = model.predict([[datetime.datetime.utcnow().hour, datetime.datetime.utcnow().weekday(), s.get("capacity",20)]])[0]
-            score_dispo = max(0, min(1, pred / s.get("capacity",20)))
-        else:
-            score_dispo = min(1, (s.get("available",0) / s.get("capacity",20)))
-        score_prox = 1 - (dist / radius)
-        score = 0.4*score_dispo + 0.3*score_prox
-        scored.append((score, s, dist))
-    scored.sort(reverse=True, key=lambda x: x[0])
-    best = scored[0]
-    return jsonify({
-        "station": {
-            "station_id": best[1]["station_id"],
-            "name": best[1].get("name")
-        },
-        "walk_m": best[2],
-        "score": best[0]
-    })
 
-@app.route("/stats/distribution")
-def distribution():
-    # simple: use admin command getShardDistribution via db.runCommand not available, so we show counts
+@app.route('/monitoring/')
+def dashboard():
+    # 1. Récupérer les stats de Sharding
+    shard_stats = get_shard_stats()
+
+    # 2. Récupérer la dernière date de mise à jour
+    last_entry = db.status.find_one(sort=[("_id", -1)])
+    
+    # --- CORRECTION DE LA GESTION DES DATES ---
+    time_since_update = "Jamais"
+    last_update_str = "Aucune donnée"
+
+    if last_entry and 'timestamp' in last_entry:
+        last_update = last_entry['timestamp']
+        
+        # On s'assure que la date venant de Mongo est "aware" (a un timezone)
+        # Si elle est naive (pas de tz), on lui colle UTC
+        if last_update.tzinfo is None:
+            last_update = last_update.replace(tzinfo=timezone.utc)
+            
+        # On récupère l'heure actuelle en UTC "aware" (la nouvelle façon de faire en Python 3.12+)
+        now_utc = datetime.now(timezone.utc)
+        
+        # Maintenant on peut soustraire sans erreur
+        delta = now_utc - last_update
+        minutes = int(delta.total_seconds() / 60)
+        
+        time_since_update = f"il y a {minutes} min"
+        last_update_str = last_update.strftime("%Y-%m-%d %H:%M:%S UTC")
+
+    # 3. Compteurs globaux
+    total_stations = db.stations.count_documents({})
+    total_status_logs = db.status.count_documents({})
+
+    return render_template(
+        'monitor.html',
+        shard_stats=shard_stats,
+        last_update=last_update_str, # On passe une string formatée pour éviter les soucis dans le HTML
+        time_since_update=time_since_update,
+        total_stations=total_stations,
+        total_status_logs=total_status_logs
+    )
+
+
+@app.route('/velib_list/')
+def velib_list():
+    # Pipeline d'agrégation pour récupérer les stations ET leur dernier statut
+    # C'est l'équivalent d'un JOIN en SQL
     pipeline = [
-        {"$group": {"_id":"$station_id", "count":{"$sum":1}}}
+        {"$limit": 50},  # On en prend juste 50 pour l'exemple (évite de charger 1500 lignes)
+        {
+            "$lookup": {
+                "from": "status",             # Table à joindre
+                "localField": "station_id",   # Clé dans 'stations'
+                "foreignField": "station_id", # Clé dans 'status'
+                "as": "status_info"           # Nom du champ résultat
+            }
+        },
+        # Le lookup renvoie une liste, on prend le dernier élément (le plus récent)
+        {
+            "$addFields": {
+                "latest_status": {"$last": "$status_info"}
+            }
+        }
     ]
-    total = stations.count_documents({})
-    return jsonify({"total_docs": total})
+
+    # Exécution de la requête sur le cluster
+    stations = list(db.stations.aggregate(pipeline))
+
+    return render_template('velib_list.html', stations=stations)
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000)
-
-
-import gpxpy, gpxpy.gpx
-@app.route("/export/gpx", methods=["POST"])
-def export_gpx():
-    route = request.get_json()["geojson"]  # list of [lat,lon]
-    gpx = gpxpy.gpx.GPX()
-    track = gpxpy.gpx.GPXTrack()
-    gpx.tracks.append(track)
-    seg = gpxpy.gpx.GPXTrackSegment()
-    track.segments.append(seg)
-    for c in route:
-        seg.points.append(gpxpy.gpx.GPXTrackPoint(c[0], c[1]))
-    return gpx.to_xml(), 200, {'Content-Type':'application/gpx+xml'}
+    # Host 0.0.0.0 est obligatoire pour que Docker expose le port
+    app.run(host='0.0.0.0', port=5000, debug=True)
