@@ -1,0 +1,255 @@
+<!DOCTYPE html>
+<html lang="fr">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Carte Vélib Live</title>
+
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster/dist/MarkerCluster.css" />
+    <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster/dist/MarkerCluster.Default.css" />
+
+    <!-- TomSelect CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/tom-select@2.2.2/dist/css/tom-select.css" rel="stylesheet">
+
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            font-family: sans-serif;
+        }
+
+        /* Header fixe en haut */
+        header {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 60px;
+            background-color: white;
+            box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+            z-index: 2000;
+            /* Au-dessus de la carte */
+            display: flex;
+            align-items: center;
+            padding: 0 20px;
+            box-sizing: border-box;
+        }
+
+        header h1 {
+            font-size: 1.2rem;
+            margin-right: 20px;
+            color: #333;
+        }
+
+        /* Container pour la barre de recherche */
+        .search-container {
+            flex-grow: 1;
+            max-width: 400px;
+        }
+
+        #map {
+            /* On décale la carte pour ne pas qu'elle soit cachée par le header */
+            margin-top: 60px;
+            height: calc(100vh - 60px);
+            width: 100%;
+        }
+
+        .info-box {
+            position: absolute;
+            top: 70px;
+            /* Décalé à cause du header */
+            right: 10px;
+            z-index: 1000;
+            background: white;
+            padding: 10px;
+            border-radius: 5px;
+            box-shadow: 0 0 10px rgba(0, 0, 0, 0.2);
+        }
+
+        /* Styles pour les clusters personnalisés */
+        .marker-cluster-custom {
+            background-clip: padding-box;
+            border-radius: 20px;
+            text-align: center;
+            color: white;
+            font-weight: bold;
+            font-family: sans-serif;
+            line-height: 40px;
+        }
+
+        .marker-cluster-custom div {
+            width: 30px;
+            height: 30px;
+            margin-left: 5px;
+            margin-top: 5px;
+            text-align: center;
+            border-radius: 15px;
+            font: 12px "Helvetica Neue", Arial, Helvetica, sans-serif;
+        }
+
+        .marker-cluster-red {
+            background-color: rgba(255, 0, 0, 0.6);
+        }
+
+        .marker-cluster-red div {
+            background-color: rgba(255, 0, 0, 0.9);
+        }
+
+        .marker-cluster-orange {
+            background-color: rgba(255, 165, 0, 0.6);
+        }
+
+        .marker-cluster-orange div {
+            background-color: rgba(255, 165, 0, 0.9);
+        }
+
+        .marker-cluster-green {
+            background-color: rgba(0, 128, 0, 0.6);
+        }
+
+        .marker-cluster-green div {
+            background-color: rgba(0, 128, 0, 0.9);
+        }
+    </style>
+</head>
+
+<body>
+
+    <header>
+        <h1>Vélib' Live</h1>
+        <div class="search-container">
+            <select id="station-select" placeholder="Rechercher une station..."></select>
+        </div>
+    </header>
+
+    <div class="info-box">
+        <strong>État du réseau</strong><br>
+        <span id="status-text">Chargement...</span>
+    </div>
+
+    <div id="map"></div>
+
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="https://unpkg.com/leaflet.markercluster/dist/leaflet.markercluster.js"></script>
+    <!-- TomSelect JS -->
+    <script src="https://cdn.jsdelivr.net/npm/tom-select@2.2.2/dist/js/tom-select.complete.min.js"></script>
+
+    <script>
+        // 1. Initialisation de la carte
+        var map = L.map('map').setView([48.8566, 2.3522], 13);
+
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '© OpenStreetMap contributors'
+        }).addTo(map);
+
+        var markers = L.markerClusterGroup({
+            iconCreateFunction: function (cluster) {
+                var children = cluster.getAllChildMarkers();
+                var sumBikes = 0;
+                var count = 0;
+                for (var i = 0; i < children.length; i++) {
+                    sumBikes += children[i].options.bikesAvailable;
+                    count++;
+                }
+                var avg = count > 0 ? sumBikes / count : 0;
+                var c = ' marker-cluster-';
+                if (avg < 1) c += 'red';
+                else if (avg < 4) c += 'orange';
+                else c += 'green';
+
+                return new L.DivIcon({
+                    html: '<div><span>' + count + '</span></div>',
+                    className: 'marker-cluster-custom' + c,
+                    iconSize: new L.Point(40, 40)
+                });
+            }
+        });
+
+        // Stockage des markers pour accès rapide par ID
+        var markersById = {};
+
+        // 2. Récupération des données
+        fetch('/api/map_data')
+            .then(response => response.json())
+            .then(stations => {
+                document.getElementById('status-text').innerText = stations.length + " stations trouvées";
+
+                var selectOptions = []; // Pour TomSelect
+
+                stations.forEach(station => {
+                    if (station.lat && station.lon) {
+                        var bikes = station.bikes || 0;
+                        var docks = station.docks || 0;
+
+                        var markerColor = 'green';
+                        if (bikes === 0) markerColor = 'red';
+                        else if (bikes <= 5) markerColor = 'orange';
+
+                        var customIcon = new L.Icon({
+                            iconUrl: `https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-${markerColor}.png`,
+                            shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/0.7.7/images/marker-shadow.png',
+                            iconSize: [25, 41],
+                            iconAnchor: [12, 41],
+                            popupAnchor: [1, -34],
+                            shadowSize: [41, 41]
+                        });
+
+                        var marker = L.marker([station.lat, station.lon], {
+                            icon: customIcon,
+                            title: station.name,
+                            bikesAvailable: bikes
+                        });
+
+                        marker.bindPopup(`
+                            <b>${station.name}</b><br>
+                            🚲 Vélos dispo: <b>${bikes}</b><br>
+                            🅿️ Places dispo: <b>${docks}</b>
+                        `);
+
+                        markers.addLayer(marker);
+
+                        // Ajout à la liste pour la recherche
+                        // On utilise station.station_id comme valeur (assurez-vous que l'API le renvoie)
+                        // Si l'API ne renvoie pas station_id, on peut utiliser le nom comme valeur
+                        var val = station.station_id || station.name;
+                        selectOptions.push({ value: val, text: station.name });
+
+                        // On stocke le marker pour pouvoir zoomer dessus
+                        markersById[val] = marker;
+                    }
+                });
+
+                map.addLayer(markers);
+
+                // 3. Initialisation de la recherche (TomSelect)
+                new TomSelect("#station-select", {
+                    options: selectOptions,
+                    create: false,
+                    sortField: {
+                        field: "text",
+                        direction: "asc"
+                    },
+                    onChange: function (value) {
+                        var marker = markersById[value];
+                        if (marker) {
+                            // On zoome sur le marker
+                            map.flyTo(marker.getLatLng(), 18);
+                            // On ouvre le cluster si besoin
+                            markers.zoomToShowLayer(marker, function () {
+                                marker.openPopup();
+                            });
+                        }
+                    }
+                });
+
+            })
+            .catch(error => {
+                console.error('Erreur:', error);
+                document.getElementById('status-text').innerText = "Erreur chargement données";
+            });
+    </script>
+</body>
+
+</html>
