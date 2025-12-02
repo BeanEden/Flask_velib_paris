@@ -18,23 +18,22 @@
             margin: 0;
             padding: 0;
             font-family: sans-serif;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
         }
 
         /* Header fixe en haut */
         header {
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
             height: 60px;
             background-color: white;
             box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
             z-index: 2000;
-            /* Au-dessus de la carte */
             display: flex;
             align-items: center;
             padding: 0 20px;
             box-sizing: border-box;
+            flex-shrink: 0;
         }
 
         header h1 {
@@ -43,24 +42,88 @@
             color: #333;
         }
 
-        /* Container pour la barre de recherche */
         .search-container {
             flex-grow: 1;
             max-width: 400px;
         }
 
+        /* Layout principal : Carte + Sidebar */
+        #main-container {
+            display: flex;
+            flex: 1;
+            overflow: hidden;
+            /* Empêche le scroll global */
+        }
+
         #map {
-            /* On décale la carte pour ne pas qu'elle soit cachée par le header */
-            margin-top: 60px;
-            height: calc(100vh - 60px);
-            width: 100%;
+            flex: 1;
+            height: 100%;
+        }
+
+        #sidebar {
+            width: 350px;
+            /* Un peu plus large pour le graph */
+            background: #f8f9fa;
+            border-left: 1px solid #ddd;
+            overflow-y: auto;
+            padding: 10px;
+            box-shadow: -2px 0 5px rgba(0, 0, 0, 0.05);
+            display: flex;
+            flex-direction: column;
+        }
+
+        #sidebar h2 {
+            font-size: 1rem;
+            margin-top: 0;
+            margin-bottom: 10px;
+            color: #555;
+            border-bottom: 2px solid #ddd;
+            padding-bottom: 5px;
+        }
+
+        .station-item {
+            background: white;
+            padding: 10px;
+            margin-bottom: 8px;
+            border-radius: 4px;
+            border: 1px solid #eee;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+
+        .station-item:hover {
+            background: #e9ecef;
+            border-color: #ced4da;
+        }
+
+        .station-name {
+            font-weight: bold;
+            font-size: 0.9rem;
+            margin-bottom: 5px;
+            display: block;
+        }
+
+        .station-stats {
+            font-size: 0.85rem;
+            color: #666;
+            display: flex;
+            justify-content: space-between;
+        }
+
+        .stat-bikes {
+            color: green;
+            font-weight: bold;
+        }
+
+        .stat-docks {
+            color: blue;
         }
 
         .info-box {
             position: absolute;
             top: 70px;
-            /* Décalé à cause du header */
-            right: 10px;
+            right: 370px;
+            /* Décalé pour ne pas chevaucher la sidebar */
             z-index: 1000;
             background: white;
             padding: 10px;
@@ -68,7 +131,7 @@
             box-shadow: 0 0 10px rgba(0, 0, 0, 0.2);
         }
 
-        /* Styles pour les clusters personnalisés */
+        /* Styles clusters */
         .marker-cluster-custom {
             background-clip: padding-box;
             border-radius: 20px;
@@ -112,6 +175,76 @@
         .marker-cluster-green div {
             background-color: rgba(0, 128, 0, 0.9);
         }
+
+        /* Style Chart */
+        #chart-container {
+            margin-top: 20px;
+            padding-top: 10px;
+            border-top: 2px solid #ddd;
+            height: 200px;
+            position: relative;
+            /* Pour le loader absolu */
+        }
+
+        #chart-loader {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            font-size: 0.9rem;
+            color: #666;
+            background: rgba(255, 255, 255, 0.8);
+            padding: 5px 10px;
+            border-radius: 4px;
+            display: none;
+            /* Caché par défaut */
+            z-index: 10;
+        }
+
+        #chart-no-data {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            font-size: 0.9rem;
+            color: #888;
+            font-style: italic;
+            display: none;
+            text-align: center;
+            width: 100%;
+        }
+
+        .custom-pin {
+            font-size: 24px;
+            text-align: center;
+            line-height: 30px;
+        }
+
+        .suggestions-box {
+            position: absolute;
+            top: 100%;
+            left: 0;
+            right: 0;
+            background: white;
+            border: 1px solid #ddd;
+            border-top: none;
+            z-index: 1000;
+            max-height: 200px;
+            overflow-y: auto;
+            display: none;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        }
+
+        .suggestion-item {
+            padding: 8px;
+            cursor: pointer;
+            border-bottom: 1px solid #eee;
+            font-size: 0.9rem;
+        }
+
+        .suggestion-item:hover {
+            background-color: #f0f0f0;
+        }
     </style>
 </head>
 
@@ -124,17 +257,59 @@
         </div>
     </header>
 
+    <div id="main-container">
+        <div id="map"></div>
+        <div id="sidebar">
+            <div id="route-container" style="border-bottom: 2px solid #ddd; padding-bottom: 10px; margin-bottom: 10px;">
+                <h2 style="cursor: pointer;" onclick="toggleRoute()">Planifier un trajet ▼</h2>
+                <div id="route-form" style="display: none;">
+                    <div style="position: relative;">
+                        <input type="text" id="start-addr" placeholder="Adresse de départ"
+                            oninput="handleInput(this, 'start-suggestions')"
+                            style="width: 100%; margin-bottom: 5px; padding: 5px; box-sizing: border-box;">
+                        <div id="start-suggestions" class="suggestions-box"></div>
+                    </div>
+
+                    <div style="position: relative;">
+                        <input type="text" id="end-addr" placeholder="Adresse d'arrivée"
+                            oninput="handleInput(this, 'end-suggestions')"
+                            style="width: 100%; margin-bottom: 5px; padding: 5px; box-sizing: border-box;">
+                        <div id="end-suggestions" class="suggestions-box"></div>
+                    </div>
+
+                    <input type="datetime-local" id="route-time"
+                        style="width: 100%; margin-bottom: 5px; padding: 5px; box-sizing: border-box;">
+                    <button onclick="calculateRoute()"
+                        style="width: 100%; padding: 8px; background: #007bff; color: white; border: none; border-radius: 4px; cursor: pointer;">Calculer
+                        l'itinéraire</button>
+                    <div id="route-result" style="margin-top: 10px; font-size: 0.9rem;"></div>
+                </div>
+            </div>
+
+            <h2>Stations visibles (<span id="visible-count">0</span>)</h2>
+            <div id="station-list" style="flex: 1; overflow-y: auto;">
+                <!-- Liste remplie par JS -->
+                <p style="color:#888; font-style:italic;">Déplacez la carte...</p>
+            </div>
+
+            <div id="chart-container">
+                <div id="chart-loader">Chargement...</div>
+                <div id="chart-no-data">Aucune donnée historique</div>
+                <canvas id="hourlyChart"></canvas>
+            </div>
+        </div>
+    </div>
+
     <div class="info-box">
         <strong>État du réseau</strong><br>
         <span id="status-text">Chargement...</span>
     </div>
 
-    <div id="map"></div>
-
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <script src="https://unpkg.com/leaflet.markercluster/dist/leaflet.markercluster.js"></script>
-    <!-- TomSelect JS -->
     <script src="https://cdn.jsdelivr.net/npm/tom-select@2.2.2/dist/js/tom-select.complete.min.js"></script>
+    <!-- Chart.js -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 
     <script>
         // 1. Initialisation de la carte
@@ -167,16 +342,479 @@
             }
         });
 
-        // Stockage des markers pour accès rapide par ID
+        var allStationsData = []; // Stocke toutes les données brutes
         var markersById = {};
+        var hourlyChart = null;
+        var updateTimeout = null;
+        var selectedStationId = null; // Station actuellement sélectionnée
+        var routeLayer = L.layerGroup().addTo(map); // Layer pour l'itinéraire
+        var startCoords = null;
+        var endCoords = null;
+        var debounceTimeout = null;
+
+        // Initialiser l'heure par défaut
+        var now = new Date();
+        now.setMinutes(now.getMinutes() - now.getTimezoneOffset());
+        document.getElementById('route-time').value = now.toISOString().slice(0, 16);
+
+        function toggleRoute() {
+            var form = document.getElementById('route-form');
+            form.style.display = form.style.display === 'none' ? 'block' : 'none';
+        }
+
+        function handleInput(input, suggestionsId) {
+            var query = input.value;
+            var box = document.getElementById(suggestionsId);
+
+            if (query.length < 3) {
+                box.style.display = 'none';
+                return;
+            }
+
+            if (debounceTimeout) clearTimeout(debounceTimeout);
+            debounceTimeout = setTimeout(() => {
+                fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}`)
+                    .then(res => res.json())
+                    .then(data => {
+                        box.innerHTML = '';
+                        if (data.length > 0) {
+                            box.style.display = 'block';
+                            data.forEach(item => {
+                                var div = document.createElement('div');
+                                div.className = 'suggestion-item';
+                                div.innerText = item.display_name;
+                                div.onclick = function () {
+                                    input.value = item.display_name;
+                                    box.style.display = 'none';
+                                    if (suggestionsId === 'start-suggestions') {
+                                        startCoords = { lat: parseFloat(item.lat), lon: parseFloat(item.lon), name: item.display_name };
+                                    } else {
+                                        endCoords = { lat: parseFloat(item.lat), lon: parseFloat(item.lon), name: item.display_name };
+                                    }
+                                };
+                                box.appendChild(div);
+                            });
+                        } else {
+                            box.style.display = 'none';
+                        }
+                    })
+                    .catch(err => console.error(err));
+            }, 300);
+        }
+
+        // Hide suggestions when clicking outside
+        document.addEventListener('click', function (e) {
+            if (!e.target.closest('.suggestions-box') && !e.target.closest('input')) {
+                document.getElementById('start-suggestions').style.display = 'none';
+                document.getElementById('end-suggestions').style.display = 'none';
+            }
+        });
+
+        async function geocode(address) {
+            if (!address) return null;
+            try {
+                var res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(address)}`);
+                var data = await res.json();
+                if (data && data.length > 0) {
+                    return { lat: parseFloat(data[0].lat), lon: parseFloat(data[0].lon), name: address };
+                }
+            } catch (e) {
+                console.error("Geocode error", e);
+            }
+            return null;
+        }
+
+        async function calculateRoute() {
+            var startAddr = document.getElementById('start-addr').value;
+            var endAddr = document.getElementById('end-addr').value;
+            var time = document.getElementById('route-time').value;
+            var resultDiv = document.getElementById('route-result');
+
+            if (!startAddr || !endAddr) {
+                resultDiv.innerHTML = "<span style='color:red'>Veuillez entrer les adresses.</span>";
+                return;
+            }
+
+            resultDiv.innerHTML = "Calcul en cours...";
+            routeLayer.clearLayers();
+
+            // 1. Géocodage (ou utilisation du cache)
+            var startLoc = startCoords && startCoords.name === startAddr ? startCoords : await geocode(startAddr);
+            var endLoc = endCoords && endCoords.name === endAddr ? endCoords : await geocode(endAddr);
+
+            if (!startLoc || !endLoc) {
+                resultDiv.innerHTML = "<span style='color:red'>Adresse introuvable.</span>";
+                return;
+            }
+
+            // 2. Appel API Route
+            try {
+                var res = await fetch('/api/find_route', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        start_lat: startLoc.lat,
+                        start_lon: startLoc.lon,
+                        end_lat: endLoc.lat,
+                        end_lon: endLoc.lon,
+                        time: time
+                    })
+                });
+                var data = await res.json();
+
+                if (data.error) {
+                    resultDiv.innerHTML = `<span style='color:red'>Erreur: ${data.error}</span>`;
+                    return;
+                }
+
+                var startStation = data.start_station;
+                var endStation = data.end_station;
+
+                if (!startStation || !endStation) {
+                    resultDiv.innerHTML = "<span style='color:orange'>Aucune station trouvée à proximité.</span>";
+                    return;
+                }
+
+                // 3. Affichage
+                // Marqueurs Départ/Arrivée
+                L.marker([startLoc.lat, startLoc.lon], { icon: L.divIcon({ className: 'custom-pin', html: '🚩', iconSize: [30, 30] }) }).addTo(routeLayer).bindPopup("Départ: " + startLoc.name);
+                L.marker([endLoc.lat, endLoc.lon], { icon: L.divIcon({ className: 'custom-pin', html: '🏁', iconSize: [30, 30] }) }).addTo(routeLayer).bindPopup("Arrivée: " + endLoc.name);
+
+                // Fonction helper pour OSRM
+                async function getOSRMRoute(p1, p2, profile) {
+                    try {
+                        var url = `https://router.project-osrm.org/route/v1/${profile}/${p1.lon},${p1.lat};${p2.lon},${p2.lat}?overview=full&geometries=geojson`;
+                        var res = await fetch(url);
+                        var json = await res.json();
+                        if (json.routes && json.routes.length > 0) {
+                            return json.routes[0].geometry.coordinates.map(c => [c[1], c[0]]); // Swap to [lat, lon]
+                        }
+                    } catch (e) {
+                        console.error("OSRM Error", e);
+                    }
+                    return [[p1.lat, p1.lon], [p2.lat, p2.lon]]; // Fallback straight line
+                }
+
+                // Récupérer les 3 segments
+                var walk1 = await getOSRMRoute(startLoc, startStation, 'foot');
+                var bike = await getOSRMRoute(startStation, endStation, 'bike');
+                var walk2 = await getOSRMRoute(endStation, endLoc, 'foot');
+
+                // Dessiner les lignes
+                var line1 = L.polyline(walk1, { color: '#666', weight: 4, dashArray: '5, 10', opacity: 0.8 }).addTo(routeLayer);
+                var line2 = L.polyline(bike, { color: '#007bff', weight: 5, opacity: 0.9 }).addTo(routeLayer);
+                var line3 = L.polyline(walk2, { color: '#666', weight: 4, dashArray: '5, 10', opacity: 0.8 }).addTo(routeLayer);
+
+                // Zoomer sur tout le trajet
+                var group = new L.featureGroup([line1, line2, line3]);
+                map.fitBounds(group.getBounds(), { padding: [50, 50] });
+
+                // Résultat texte
+                resultDiv.innerHTML = `
+                    <b>Itinéraire détaillé :</b><br>
+                    🚶 1. Marcher vers <b>${startStation.name}</b> (${startStation.distance}m)<br>
+                    🚲 2. Prendre un vélo (${startStation.bikes !== null ? startStation.bikes + ' dispos' : 'Prévisionnel'})<br>
+                    🚲 3. Pédaler vers <b>${endStation.name}</b><br>
+                    ✅ 4. Déposer le vélo (${endStation.docks !== null ? endStation.docks + ' places' : 'Prévisionnel'})<br>
+                    🚶 5. Marcher vers destination (${endStation.distance}m)
+                `;
+
+            } catch (e) {
+                console.error(e);
+                resultDiv.innerHTML = "<span style='color:red'>Erreur technique.</span>";
+            }
+        }
+
+        // Fonction pour mettre à jour la liste latérale et le graph
+        function updateVisibleStations() {
+            var bounds = map.getBounds();
+            var visibleStations = [];
+            var visibleIds = [];
+            var listContainer = document.getElementById('station-list');
+            var countSpan = document.getElementById('visible-count');
+
+            // Filtrer les stations dans la vue
+            allStationsData.forEach(station => {
+                if (station.lat && station.lon) {
+                    var latLng = L.latLng(station.lat, station.lon);
+                    if (bounds.contains(latLng)) {
+                        visibleStations.push(station);
+                        visibleIds.push(station.station_id);
+                    }
+                }
+            });
+
+            // Mettre à jour le compteur
+            countSpan.innerText = visibleStations.length;
+
+            // Limiter l'affichage pour la performance (ex: 50 premiers)
+            var displayLimit = 50;
+            var html = "";
+
+            if (visibleStations.length === 0) {
+                html = "<p>Aucune station visible.</p>";
+            } else {
+                visibleStations.slice(0, displayLimit).forEach(s => {
+                    var bikes = s.bikes || 0;
+                    var docks = s.docks || 0;
+                    var colorClass = bikes === 0 ? 'red' : (bikes <= 5 ? 'orange' : 'green');
+                    var colorStyle = bikes === 0 ? 'color:red;' : (bikes <= 5 ? 'color:orange;' : 'color:green;');
+
+                    // Highlight si sélectionné
+                    var isSelected = (s.station_id === selectedStationId);
+                    var bgStyle = isSelected ? 'background-color: #e2e6ea; border-color: #adb5bd;' : '';
+
+                    html += `
+                        <div class="station-item" style="${bgStyle}" onclick="zoomToStation('${s.station_id || s.name.replace(/'/g, "\\'")}')">
+                            <span class="station-name">${s.name}</span>
+                            <div class="station-stats">
+                                <span style="${colorStyle}">🚲 ${bikes} vélos</span>
+                                <span>🅿️ ${docks} places</span>
+                            </div>
+                        </div>
+                    `;
+                });
+
+                if (visibleStations.length > displayLimit) {
+                    html += `<div style="text-align:center; padding:10px; color:#888;">+ ${visibleStations.length - displayLimit} autres stations...</div>`;
+                }
+            }
+
+            listContainer.innerHTML = html;
+
+            // Mettre à jour le graphique (Debounce pour éviter trop d'appels)
+            if (updateTimeout) clearTimeout(updateTimeout);
+            updateTimeout = setTimeout(() => {
+                // Si une station est sélectionnée, on affiche uniquement ses stats
+                if (selectedStationId) {
+                    fetchHourlyStats([selectedStationId]);
+                } else {
+                    fetchHourlyStats(visibleIds);
+                }
+            }, 500); // Attendre 500ms après la fin du mouvement
+        }
+
+        function fetchHourlyStats(stationIds) {
+            var loader = document.getElementById('chart-loader');
+            var noData = document.getElementById('chart-no-data');
+            var canvas = document.getElementById('hourlyChart');
+
+            if (stationIds.length === 0) {
+                updateChart([], 0, false);
+                loader.style.display = 'none';
+                noData.style.display = 'block';
+                noData.innerText = "Aucune station visible";
+                canvas.style.opacity = 0;
+                return;
+            }
+
+            // Afficher le loader
+            loader.style.display = 'block';
+            noData.style.display = 'none';
+            canvas.style.opacity = 0.5; // Griser le graph existant
+
+            // On ne prend que les 200 premiers IDs max pour ne pas exploser la requête
+            var idsToSend = stationIds.slice(0, 200);
+
+            fetch('/api/hourly_stats', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ station_ids: idsToSend })
+            })
+                .then(res => res.json())
+                .then(response => {
+                    loader.style.display = 'none';
+                    canvas.style.opacity = 1;
+
+                    var data = response.data || [];
+                    var capacity = response.capacity || 0;
+
+                    // Vérifier si on a des données (somme > 0)
+                    // On filtre les nulls pour la vérification
+                    var validData = data.filter(val => val !== null);
+                    var hasData = validData.some(val => val > 0);
+
+                    if (!hasData && validData.length === 0) {
+                        noData.style.display = 'block';
+                        noData.innerText = "Pas de données historiques";
+                    }
+
+                    // On affiche la capacité max seulement si une seule station est sélectionnée/visible
+                    var isSingleStation = (stationIds.length === 1);
+                    updateChart(data, capacity, isSingleStation);
+                })
+                .catch(err => {
+                    console.error("Erreur stats:", err);
+                    loader.style.display = 'none';
+                    noData.style.display = 'block';
+                    noData.innerText = "Erreur chargement";
+                });
+        }
+
+        function updateChart(data, capacity, isSingleStation) {
+            var ctx = document.getElementById('hourlyChart').getContext('2d');
+
+            if (hourlyChart) {
+                hourlyChart.destroy();
+            }
+
+            var labels = Array.from({ length: 24 }, (_, i) => i + "h");
+
+            // 1. Calcul de la moyenne globale (Ligne constante)
+            // On ignore les valeurs nulles pour le calcul de la moyenne
+            var validData = data.filter(val => val !== null);
+            var total = validData.reduce((a, b) => a + b, 0);
+            var globalAvg = validData.length > 0 ? total / validData.length : 0;
+            var avgData = Array(24).fill(globalAvg);
+
+            // Données pour la ligne de capacité max
+            var capacityData = Array(24).fill(capacity);
+
+            // 2. Couleurs dynamiques (Bleu = 0 -> Rouge = Max)
+            // Pour l'échelle de couleur, on utilise la capacité max si dispo, sinon le max des données
+            var maxScale = capacity > 0 ? capacity : Math.max(...validData, 1);
+
+            var backgroundColors = data.map(val => {
+                if (val === null) return 'rgba(200, 200, 200, 0.2)'; // Gris pour null
+                if (maxScale === 0) return 'rgba(0, 0, 255, 0.6)';
+
+                var ratio = val / maxScale;
+                // Interpolation : Bleu (0,0,255) -> Rouge (255,0,0)
+                var r = Math.floor(ratio * 255);
+                var b = Math.floor((1 - ratio) * 255);
+                return `rgba(${r}, 0, ${b}, 0.7)`;
+            });
+
+            // 3. Surbrillance de l'heure actuelle
+            var currentHour = new Date().getHours();
+            var borderColors = data.map((_, i) => i === currentHour ? '#000000' : 'rgba(0,0,0,0)'); // Bordure noire pour l'heure actuelle
+            var borderWidths = data.map((_, i) => i === currentHour ? 3 : 0);
+
+            var datasets = [
+                {
+                    type: 'line',
+                    label: 'Moyenne journalière',
+                    data: avgData,
+                    borderColor: 'rgba(50, 50, 50, 0.8)',
+                    borderWidth: 2,
+                    borderDash: [5, 5],
+                    pointRadius: 0,
+                    order: 1,
+                    tension: 0
+                },
+                {
+                    type: 'bar',
+                    label: 'Dispo. Moyenne',
+                    data: data,
+                    backgroundColor: backgroundColors,
+                    borderColor: borderColors,
+                    borderWidth: borderWidths,
+                    order: 2,
+                    skipNull: true
+                }
+            ];
+
+            // Ajouter la ligne de capacité max SEULEMENT si une seule station est affichée
+            if (isSingleStation) {
+                datasets.unshift({
+                    type: 'line',
+                    label: 'Capacité Max',
+                    data: capacityData,
+                    borderColor: 'rgba(255, 99, 132, 1)',
+                    borderWidth: 2,
+                    pointRadius: 0,
+                    order: 0,
+                    tension: 0,
+                    fill: false
+                });
+            }
+
+            hourlyChart = new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: labels,
+                    datasets: datasets
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            title: { display: true, text: 'Vélos' },
+                            suggestedMax: (isSingleStation && capacity > 0) ? capacity * 1.1 : undefined
+                        },
+                        x: {
+                            ticks: { maxRotation: 0, autoSkip: true, maxTicksLimit: 12 }
+                        }
+                    },
+                    plugins: {
+                        title: {
+                            display: true,
+                            text: isSingleStation ? 'Disponibilité (Station sélectionnée)' : 'Moyenne horaire (Stations visibles)'
+                        },
+                        legend: {
+                            display: true,
+                            labels: {
+                                filter: function (item, chart) {
+                                    // Masquer la légende des barres car la couleur change
+                                    return item.text === 'Moyenne journalière' || (isSingleStation && item.text === 'Capacité Max');
+                                }
+                            }
+                        },
+                        tooltip: {
+                            callbacks: {
+                                label: function (context) {
+                                    if (context.raw === null) return 'Pas de données';
+                                    return context.dataset.label + ': ' + context.raw;
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+        }
+
+        // Fonction globale pour le clic dans la liste
+        window.zoomToStation = function (id) {
+            selectedStationId = id; // Définir la station sélectionnée
+
+            var marker = markersById[id];
+            if (!marker) {
+                for (var key in markersById) {
+                    if (markersById[key].options.title === id) {
+                        marker = markersById[key];
+                        break;
+                    }
+                }
+            }
+            if (marker) {
+                map.flyTo(marker.getLatLng(), 18);
+                markers.zoomToShowLayer(marker, function () {
+                    marker.openPopup();
+                });
+            }
+
+            // Mettre à jour l'interface (liste + graph)
+            updateVisibleStations();
+        };
+
+        // Désélectionner au clic sur la carte (fond)
+        map.on('click', function (e) {
+            if (selectedStationId) {
+                selectedStationId = null;
+                updateVisibleStations();
+            }
+        });
 
         // 2. Récupération des données
         fetch('/api/map_data')
             .then(response => response.json())
             .then(stations => {
+                allStationsData = stations; // Sauvegarde globale
                 document.getElementById('status-text').innerText = stations.length + " stations trouvées";
 
-                var selectOptions = []; // Pour TomSelect
+                var selectOptions = [];
 
                 stations.forEach(station => {
                     if (station.lat && station.lon) {
@@ -199,7 +837,8 @@
                         var marker = L.marker([station.lat, station.lon], {
                             icon: customIcon,
                             title: station.name,
-                            bikesAvailable: bikes
+                            bikesAvailable: bikes,
+                            stationId: station.station_id // Stocker l'ID
                         });
 
                         marker.bindPopup(`
@@ -208,41 +847,38 @@
                             🅿️ Places dispo: <b>${docks}</b>
                         `);
 
+                        // Sélectionner au clic sur le marqueur
+                        marker.on('click', function () {
+                            selectedStationId = station.station_id;
+                            updateVisibleStations();
+                        });
+
                         markers.addLayer(marker);
 
-                        // Ajout à la liste pour la recherche
-                        // On utilise station.station_id comme valeur (assurez-vous que l'API le renvoie)
-                        // Si l'API ne renvoie pas station_id, on peut utiliser le nom comme valeur
                         var val = station.station_id || station.name;
                         selectOptions.push({ value: val, text: station.name });
-
-                        // On stocke le marker pour pouvoir zoomer dessus
                         markersById[val] = marker;
                     }
                 });
 
                 map.addLayer(markers);
 
-                // 3. Initialisation de la recherche (TomSelect)
+                // Initialisation TomSelect
                 new TomSelect("#station-select", {
                     options: selectOptions,
                     create: false,
-                    sortField: {
-                        field: "text",
-                        direction: "asc"
-                    },
+                    sortField: { field: "text", direction: "asc" },
                     onChange: function (value) {
-                        var marker = markersById[value];
-                        if (marker) {
-                            // On zoome sur le marker
-                            map.flyTo(marker.getLatLng(), 18);
-                            // On ouvre le cluster si besoin
-                            markers.zoomToShowLayer(marker, function () {
-                                marker.openPopup();
-                            });
-                        }
+                        window.zoomToStation(value);
                     }
                 });
+
+                // Initialiser la liste visible
+                updateVisibleStations();
+
+                // Ecouter les mouvements de carte
+                map.on('moveend', updateVisibleStations);
+                map.on('zoomend', updateVisibleStations);
 
             })
             .catch(error => {
