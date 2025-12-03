@@ -670,19 +670,12 @@
             // Données pour la ligne de capacité max
             var capacityData = Array(24).fill(capacity);
 
-            // 2. Couleurs dynamiques (Bleu = 0 -> Rouge = Max)
-            // Pour l'échelle de couleur, on utilise la capacité max si dispo, sinon le max des données
-            var maxScale = capacity > 0 ? capacity : Math.max(...validData, 1);
-
+            // 2. Couleurs dynamiques (Logique des marqueurs : Rouge -> Orange -> Vert)
             var backgroundColors = data.map(val => {
                 if (val === null) return 'rgba(200, 200, 200, 0.2)'; // Gris pour null
-                if (maxScale === 0) return 'rgba(0, 0, 255, 0.6)';
-
-                var ratio = val / maxScale;
-                // Interpolation : Bleu (0,0,255) -> Rouge (255,0,0)
-                var r = Math.floor(ratio * 255);
-                var b = Math.floor((1 - ratio) * 255);
-                return `rgba(${r}, 0, ${b}, 0.7)`;
+                if (val === 0) return 'rgba(214, 69, 65, 0.7)'; // Rouge
+                if (val <= 5) return 'rgba(243, 156, 18, 0.7)'; // Orange
+                return 'rgba(40, 167, 69, 0.7)'; // Vert
             });
 
             // 3. Surbrillance de l'heure actuelle
@@ -695,7 +688,7 @@
                     type: 'line',
                     label: 'Moyenne journalière',
                     data: avgData,
-                    borderColor: 'rgba(50, 50, 50, 0.8)',
+                    borderColor: 'rgba(50, 50, 50, 0.8)', // Gris foncé
                     borderWidth: 2,
                     borderDash: [5, 5],
                     pointRadius: 0,
@@ -720,7 +713,7 @@
                     type: 'line',
                     label: 'Capacité Max',
                     data: capacityData,
-                    borderColor: 'rgba(255, 99, 132, 1)',
+                    borderColor: 'rgba(52, 152, 219, 1)', // Bleu
                     borderWidth: 2,
                     pointRadius: 0,
                     order: 0,
@@ -751,7 +744,7 @@
                     plugins: {
                         title: {
                             display: true,
-                            text: isSingleStation ? 'Disponibilité (Station sélectionnée)' : 'Moyenne horaire (Stations visibles)'
+                            text: isSingleStation ? 'Nombre de vélos disponibles (Station sélectionnée)' : 'Nombre de vélos disponibles (Stations visibles)'
                         },
                         legend: {
                             display: true,
