@@ -552,6 +552,7 @@ def api_forecast_stats():
             for item in forecast_items:
                 t_str = item.get('time')
                 temp = item.get('temperature')
+                wind = item.get('windspeed') # Add wind
                 code = item.get('weathercode')
                 desc = get_weather_description(code)
                 
@@ -568,6 +569,7 @@ def api_forecast_stats():
                 predictions.append({
                     "time": t_str,
                     "temp": temp,
+                    "wind": wind,
                     "weather_description": desc,
                     "weather_code": code,
                     "predicted_bikes": max(0, base_availability)
@@ -582,6 +584,7 @@ def api_forecast_stats():
                 predictions.append({
                     "time": future_time.strftime("%Y-%m-%d %H:%M:%S"),
                     "temp": 15,
+                    "wind": 10,
                     "weather_description": "Données simulées",
                     "predicted_bikes": 10
                 })
@@ -593,6 +596,25 @@ def api_forecast_stats():
     except Exception as e:
         print(f"Error forecast stats: {e}")
         return jsonify({"error": str(e)}), 500
+
+import json
+from flask import send_from_directory
+
+@app.route('/model')
+def model_dashboard():
+    metrics = {}
+    try:
+        with open("/models/metrics.json", "r") as f:
+            metrics = json.load(f)
+    except Exception as e:
+        print(f"Error loading metrics: {e}")
+        metrics = {"error": "Modèle non entraîné ou fichier manquant."}
+
+    return render_template('model.html', metrics=metrics)
+
+@app.route('/models_static/<path:filename>')
+def models_static(filename):
+    return send_from_directory('/models', filename)
 
 if __name__ == "__main__":
     app.run(host='0.0.0.0', port=5000, debug=True)

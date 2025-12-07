@@ -262,6 +262,12 @@
         <div id="sidebar">
             <div id="route-container" style="border-bottom: 2px solid #ddd; padding-bottom: 10px; margin-bottom: 10px;">
                 <div style="margin-bottom: 10px;">
+                    <!-- Widget Météo -->
+                    <div id="sidebar-weather"
+                        style="background: white; border: 1px solid #ddd; padding: 10px; border-radius: 5px; margin-bottom: 10px; display: flex; align-items: center; justify-content: space-between;">
+                        <span style="font-size: 0.9rem; color: #666;">Chargement météo...</span>
+                    </div>
+
                     <a href="/forecast"
                         style="display: block; text-align: center; padding: 8px; background: #17a2b8; color: white; text-decoration: none; border-radius: 4px;">🌤️
                         Voir les Prévisions Météo</a>
@@ -361,6 +367,35 @@
         var now = new Date();
         now.setMinutes(now.getMinutes() - now.getTimezoneOffset());
         document.getElementById('route-time').value = now.toISOString().slice(0, 16);
+
+        // Fetch Weather Widget
+        fetch('/api/weather')
+            .then(res => res.json())
+            .then(data => {
+                if (data.error) return;
+
+                const temp = Math.round(data.temperature);
+                const code = data.weathercode;
+                const wind = data.windspeed;
+
+                let iconChar = "☁️";
+                if (code === 0) iconChar = "☀️";
+                else if (code <= 3) iconChar = "⛅";
+                else if (code >= 45 && code <= 48) iconChar = "🌫️";
+                else if (code >= 51 && code <= 67) iconChar = "🌧️";
+                else if (code >= 71 && code <= 77) iconChar = "❄️";
+                else if (code >= 80) iconChar = "🌦️";
+                else if (code >= 95) iconChar = "⛈️";
+
+                document.getElementById('sidebar-weather').innerHTML = `
+                    <div style="font-size: 1.5rem;">${iconChar}</div>
+                    <div style="text-align: right;">
+                        <div style="font-weight: bold; font-size: 1.1rem;">${temp}°C</div>
+                        <div style="font-size: 0.8rem; color: #666;">💨 ${wind} km/h</div>
+                    </div>
+                `;
+            })
+            .catch(err => console.error("Weather widget error:", err));
 
         function toggleRoute() {
             var form = document.getElementById('route-form');

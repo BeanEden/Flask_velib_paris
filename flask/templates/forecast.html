@@ -94,7 +94,7 @@
             .then(data => {
                 // Format: data = { temperature, windspeed, weathercode, description, ... }
                 // Note: api_weather renvoie directement l'objet plat
-                const current = data;
+                const container = document.getElementById('current-weather');
 
                 if (!current || !current.temperature) {
                     container.innerHTML = "Données non disponibles.";
@@ -105,16 +105,19 @@
                 const wind = current.windspeed;
                 const desc = current.description || "Inconnu";
 
-                // Icon mapping (simple logic kept for visuals, or could be passed from backend too)
-                const code = current.weathercode;
-                let iconChar = "☁️";
-                if (code === 0) iconChar = "☀️";
-                else if (code <= 3) iconChar = "⛅";
-                else if (code >= 45 && code <= 48) iconChar = "🌫️";
-                else if (code >= 51 && code <= 67) iconChar = "🌧️";
-                else if (code >= 71 && code <= 77) iconChar = "❄️";
-                else if (code >= 80) iconChar = "🌦️";
-                else if (code >= 95) iconChar = "⛈️";
+                // Icon mapping
+                const getIcon = (c) => {
+                    if (c === 0) return "☀️";
+                    if (c <= 3) return "⛅";
+                    if (c >= 45 && c <= 48) return "🌫️";
+                    if (c >= 51 && c <= 67) return "🌧️";
+                    if (c >= 71 && c <= 77) return "❄️";
+                    if (c >= 80) return "🌦️";
+                    if (c >= 95) return "⛈️";
+                    return "☁️";
+                };
+
+                const iconChar = getIcon(current.weathercode);
 
                 container.innerHTML = `
                 <div style="font-size: 3rem; margin-right: 20px;">${iconChar}</div>
@@ -138,15 +141,27 @@
                 const predictions = data.predictions;
                 if (!predictions || predictions.length === 0) return;
 
+                // Helper to get icon
+                const getIcon = (c) => {
+                    if (c === 0) return "☀️";
+                    if (c <= 3) return "⛅";
+                    if (c >= 45 && c <= 48) return "🌫️";
+                    if (c >= 51 && c <= 67) return "🌧️";
+                    if (c >= 71 && c <= 77) return "❄️";
+                    if (c >= 80) return "🌦️";
+                    if (c >= 95) return "⛈️";
+                    return "☁️";
+                };
+
                 const labels = predictions.map(p => {
                     const d = new Date(p.time);
-                    return d.toLocaleDateString('fr-FR', { weekday: 'short', hour: '2-digit' });
+                    const dayStr = d.toLocaleDateString('fr-FR', { weekday: 'short', hour: '2-digit' });
+                    const icon = getIcon(p.weather_code);
+                    return `${dayStr} ${icon}`;
                 });
                 const temps = predictions.map(p => p.temp);
                 const bikes = predictions.map(p => p.predicted_bikes);
-
-                // Optional: Tooltip could show weather description
-                // For now we just graph values
+                const winds = predictions.map(p => p.wind || 0);
 
                 const ctx = document.getElementById('forecastChart').getContext('2d');
                 new Chart(ctx, {
@@ -169,9 +184,18 @@
                                 borderColor: 'rgba(255, 193, 7, 1)',
                                 backgroundColor: 'rgba(255, 193, 7, 0.2)',
                                 yAxisID: 'y1',
-                                type: 'line',
                                 borderDash: [5, 5],
                                 tension: 0.4
+                            },
+                            {
+                                label: 'Vent (km/h)',
+                                data: winds,
+                                borderColor: 'rgba(23, 162, 184, 1)',
+                                backgroundColor: 'rgba(23, 162, 184, 0.1)',
+                                yAxisID: 'y1', // Share axis with Temp (scales are close enough: 0-30 usually)
+                                borderDash: [2, 2],
+                                tension: 0.2,
+                                pointStyle: 'rectRot'
                             }
                         ]
                     },
@@ -196,7 +220,7 @@
                                 grid: {
                                     drawOnChartArea: false,
                                 },
-                                title: { display: true, text: 'Température (°C)' }
+                                title: { display: true, text: 'Temp / Vent' }
                             }
                         }
                     }

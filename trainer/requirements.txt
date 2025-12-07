@@ -3,3 +3,6 @@ numpy
 scikit-learn
 pymongo
 joblib
+xgboost
+matplotlib
+seaborn

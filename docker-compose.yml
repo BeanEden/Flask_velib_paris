@@ -116,6 +116,7 @@ services:
       - mongos
     environment:
       - MONGO_URI=mongodb://mongos:27017/velib
+      - MONGO_URI_CLOUD=${MONGO_URI_CLOUD:-}
     volumes:
       - ./models:/models
     networks:
