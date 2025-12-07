@@ -1,132 +1,156 @@
 <!DOCTYPE html>
 <html lang="fr">
+
 <head>
     <meta charset="UTF-8">
     <title>Mongo Shard Monitor</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
-        .card-metric { border-left: 5px solid #0d6efd; }
-        .card-alert { border-left: 5px solid #dc3545; }
-        .card-success { border-left: 5px solid #198754; }
+        .card-metric {
+            border-left: 5px solid #0d6efd;
+        }
+
+        .card-alert {
+            border-left: 5px solid #dc3545;
+        }
+
+        .card-success {
+            border-left: 5px solid #198754;
+        }
     </style>
 </head>
+
 <body class="bg-light">
 
-<div class="container mt-4">
-    <div class="d-flex justify-content-between align-items-center mb-4">
-        <h1>🛠️ MongoDB Cluster Monitor</h1>
-        <button onclick="window.location.reload();" class="btn btn-outline-primary">🔄 Actualiser</button>
-    </div>
+    <div class="container mt-4">
+        <div class="d-flex justify-content-between align-items-center mb-4">
+            <h1>🛠️ MongoDB Cluster Monitor</h1>
+            <button onclick="window.location.reload();" class="btn btn-outline-primary">🔄 Actualiser</button>
+        </div>
 
-    <div class="row mb-4">
-        <div class="col-md-4">
-            <div class="card shadow-sm card-metric h-100">
-                <div class="card-body">
-                    <h6 class="text-muted">Dernière Synchro API</h6>
-                    <h2 class="fw-bold">{{ time_since_update }}</h2>
-                    <small class="text-muted">{{ last_update }} (UTC)</small>
+        <div class="row mb-4">
+            <div class="col-md-3">
+                <div class="card shadow-sm card-metric h-100">
+                    <div class="card-body">
+                        <h6 class="text-muted">Dernière Synchro API</h6>
+                        <h2 class="fw-bold">{{ time_since_update }}</h2>
+                        <small class="text-muted">{{ last_update }} (UTC)</small>
+                    </div>
+                </div>
+            </div>
+
+            <div class="col-md-3">
+                <div class="card shadow-sm card-metric h-100">
+                    <div class="card-body">
+                        <h6 class="text-muted">Volumétrie Vélib</h6>
+                        <h3>{{ total_stations }} <small class="fs-6 text-muted">Stations</small></h3>
+                        <h3>{{ total_status_logs }} <small class="fs-6 text-muted">Logs</small></h3>
+                    </div>
+                </div>
+            </div>
+
+            <div class="col-md-3">
+                <div class="card shadow-sm card-metric h-100" style="border-left: 5px solid #fd7e14;">
+                    <div class="card-body">
+                        <h6 class="text-muted">Données Météo</h6>
+                        <h3>{{ total_weather_logs }} <small class="fs-6 text-muted">Historique</small></h3>
+                        <small>Prévisions: {{ total_forecasts }}</small>
+                        <div class="mt-2 text-muted" style="font-size: 0.8em;">Dernière MàJ:<br>{{ weather_last_update
+                            }}</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="col-md-3">
+                <div class="card shadow-sm card-success h-100">
+                    <div class="card-body">
+                        <h6 class="text-muted">État du Cluster</h6>
+                        <h2 class="text-success">HEALTHY</h2>
+                        <small>Sharding Activé: <strong>OUI</strong></small>
+                    </div>
                 </div>
             </div>
         </div>
 
-        <div class="col-md-4">
-            <div class="card shadow-sm card-metric h-100">
-                <div class="card-body">
-                    <h6 class="text-muted">Volumétrie Totale</h6>
-                    <h3>{{ total_stations }} <small class="fs-6 text-muted">Stations</small></h3>
-                    <h3>{{ total_status_logs }} <small class="fs-6 text-muted">Logs Historique</small></h3>
+        <div class="row">
+            <div class="col-md-6">
+                <div class="card shadow">
+                    <div class="card-header bg-dark text-white">
+                        📊 Répartition des données (Stations)
+                    </div>
+                    <div class="card-body">
+                        <canvas id="shardChart"></canvas>
+                    </div>
                 </div>
             </div>
-        </div>
 
-        <div class="col-md-4">
-            <div class="card shadow-sm card-success h-100">
-                <div class="card-body">
-                    <h6 class="text-muted">État du Cluster</h6>
-                    <h2 class="text-success">HEALTHY</h2>
-                    <small>Sharding Activé: <strong>OUI</strong></small>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <div class="row">
-        <div class="col-md-6">
-            <div class="card shadow">
-                <div class="card-header bg-dark text-white">
-                    📊 Répartition des données (Stations)
-                </div>
-                <div class="card-body">
-                    <canvas id="shardChart"></canvas>
-                </div>
-            </div>
-        </div>
-
-        <div class="col-md-6">
-            <div class="card shadow">
-                <div class="card-header bg-secondary text-white">
-                    ℹ️ Détails par Shard
-                </div>
-                <div class="card-body">
-                    <table class="table table-striped">
-                        <thead>
-                            <tr>
-                                <th>Shard Name</th>
-                                <th>Documents</th>
-                                <th>Taille (KB)</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {% for i in range(shard_stats.labels|length) %}
-                            <tr>
-                                <td class="fw-bold">{{ shard_stats.labels[i] }}</td>
-                                <td>{{ shard_stats.counts[i] }}</td>
-                                <td>{{ shard_stats.sizes[i] }} KB</td>
-                            </tr>
-                            {% endfor %}
-                        </tbody>
-                    </table>
-                    <div class="alert alert-info mt-3">
-                        <strong>Info :</strong> Si les barres sont équilibrées (~50/50), votre clé de hachage <code>station_id</code> est performante.
+            <div class="col-md-6">
+                <div class="card shadow">
+                    <div class="card-header bg-secondary text-white">
+                        ℹ️ Détails par Shard
+                    </div>
+                    <div class="card-body">
+                        <table class="table table-striped">
+                            <thead>
+                                <tr>
+                                    <th>Shard Name</th>
+                                    <th>Documents</th>
+                                    <th>Taille (KB)</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for i in range(shard_stats.labels|length) %}
+                                <tr>
+                                    <td class="fw-bold">{{ shard_stats.labels[i] }}</td>
+                                    <td>{{ shard_stats.counts[i] }}</td>
+                                    <td>{{ shard_stats.sizes[i] }} KB</td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                        <div class="alert alert-info mt-3">
+                            <strong>Info :</strong> Si les barres sont équilibrées (~50/50), votre clé de hachage
+                            <code>station_id</code> est performante.
+                        </div>
                     </div>
                 </div>
             </div>
         </div>
     </div>
-</div>
 
-<script>
-    const ctx = document.getElementById('shardChart').getContext('2d');
-    const shardChart = new Chart(ctx, {
-        type: 'doughnut', // Type camembert
-        data: {
-            labels: {{ shard_stats.labels | tojson }},
-            datasets: [{
-                label: 'Nombre de documents',
-                data: {{ shard_stats.counts | tojson }},
-                backgroundColor: [
-                    'rgba(54, 162, 235, 0.7)', // Bleu pour Shard 1
-                    'rgba(255, 99, 132, 0.7)', // Rouge pour Shard 2
-                    'rgba(255, 206, 86, 0.7)'
-                ],
-                borderColor: [
-                    'rgba(54, 162, 235, 1)',
-                    'rgba(255, 99, 132, 1)',
-                    'rgba(255, 206, 86, 1)'
-                ],
-                borderWidth: 1
+    <script>
+        const ctx = document.getElementById('shardChart').getContext('2d');
+        const shardChart = new Chart(ctx, {
+            type: 'doughnut', // Type camembert
+            data: {
+                labels: {{ shard_stats.labels | tojson }},
+        datasets: [{
+            label: 'Nombre de documents',
+            data: {{ shard_stats.counts | tojson }},
+            backgroundColor: [
+            'rgba(54, 162, 235, 0.7)', // Bleu pour Shard 1
+            'rgba(255, 99, 132, 0.7)', // Rouge pour Shard 2
+            'rgba(255, 206, 86, 0.7)'
+        ],
+            borderColor: [
+            'rgba(54, 162, 235, 1)',
+            'rgba(255, 99, 132, 1)',
+            'rgba(255, 206, 86, 1)'
+        ],
+            borderWidth: 1
             }]
         },
         options: {
             responsive: true,
-            plugins: {
+                plugins: {
                 legend: { position: 'bottom' },
                 title: { display: true, text: 'Équilibrage de charge (Documents par Shard)' }
             }
         }
     });
-</script>
+    </script>
 
 </body>
+
 </html>

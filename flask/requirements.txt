@@ -5,3 +5,4 @@ joblib
 geopy
 gpxpy
 Werkzeug==2.3.7
+python-dotenv

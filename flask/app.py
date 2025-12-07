@@ -2,13 +2,53 @@ import os
 from flask import Flask, render_template, jsonify
 from pymongo import MongoClient
 from datetime import datetime, timezone
+from dotenv import load_dotenv
+
+# Charger les variables d'environnement depuis .env (pour le dev local)
+load_dotenv()
+
 
 app = Flask(__name__)
 
 # --- CONFIGURATION ---
+# --- CONFIGURATION ---
 MONGO_URI = os.getenv("MONGO_URI", "mongodb://mongos:27017/velib")
+MONGO_URI_CLOUD = os.getenv("MONGO_URI_CLOUD") # Ajout pour la météo si stockée ailleurs
+
+# Connexion principale (Velib)
 client = MongoClient(MONGO_URI)
 db = client['velib']
+
+
+
+# Connexion Météo (si Cloud spécifié, sinon local/principal)
+if MONGO_URI_CLOUD:
+    try:
+        client_weather = MongoClient(MONGO_URI_CLOUD)
+        weather_db = client_weather['Meteo'] # Correction: Base 'Meteo'
+        col_weather_current = weather_db['meteo_current']
+        col_weather_forecast = weather_db['meteo_forecast']
+        print("Connecté à MongoDB Cloud pour la Météo.")
+    except Exception as e:
+        print(f"Erreur connexion Cloud Météo: {e}, fallback sur local.")
+        col_weather_current = db['meteo_current']
+        col_weather_forecast = db['meteo_forecast']
+else:
+    col_weather_current = db['meteo_current']
+    col_weather_forecast = db['meteo_forecast']
+    
+def get_weather_description(code):
+    table = {
+        0: "Ciel clair", 1: "Principalement clair", 2: "Partiellement nuageux", 3: "Couvert",
+        45: "Brouillard", 48: "Brouillard givrant", 51: "Bruine légère", 53: "Bruine modérée",
+        55: "Bruine dense", 56: "Bruine verglaçante légère", 57: "Bruine verglaçante dense",
+        61: "Pluie faible", 63: "Pluie modérée", 65: "Pluie forte", 66: "Pluie verglaçante légère",
+        67: "Pluie verglaçante forte", 71: "Faibles chutes de neige", 73: "Chutes de neige modérées",
+        75: "Fortes chutes de neige", 77: "Grains de neige", 80: "Averses faibles", 81: "Averses modérées",
+        82: "Averses fortes", 85: "Averses de neige faibles", 86: "Averses de neige fortes",
+        95: "Orage faible/modéré", 96: "Orage avec grêle", 99: "Orage violent avec grêle",
+    }
+    return table.get(code, "Code inconnu")
 
 # --- OPTIMISATION INDEX ---
 try:
@@ -221,6 +261,18 @@ def dashboard():
 
     total_stations = db.stations.count_documents({})
     total_status_logs = db.status.count_documents({})
+    
+    # Stats Météo
+    total_weather_logs = col_weather_current.count_documents({})
+    total_forecasts = col_weather_forecast.count_documents({})
+    
+    last_weather_entry = col_weather_current.find_one(sort=[("scrape_timestamp", -1)])
+    weather_last_update_str = "Aucune donnée"
+    if last_weather_entry:
+         lwu = last_weather_entry.get('scrape_timestamp')
+         if lwu:
+             if lwu.tzinfo is None: lwu = lwu.replace(tzinfo=timezone.utc)
+             weather_last_update_str = lwu.strftime("%Y-%m-%d %H:%M:%S UTC")
 
     return render_template(
         'monitor.html',
@@ -228,7 +280,10 @@ def dashboard():
         last_update=last_update_str,
         time_since_update=time_since_update,
         total_stations=total_stations,
-        total_status_logs=total_status_logs
+        total_status_logs=total_status_logs,
+        total_weather_logs=total_weather_logs,
+        total_forecasts=total_forecasts,
+        weather_last_update=weather_last_update_str
     )
 
 @app.route('/velib_list/')
@@ -441,6 +496,103 @@ def format_station_response(station, type_):
         "bikes": station.get('realtime_bikes'), # Peut être 0 ou None si prévisionnel
         "docks": station.get('realtime_docks')
     }
+
+# --- ROUTE 5 : MÉTÉO & PRÉVISIONS ---
+
+@app.route('/forecast')
+def forecast_page():
+    return render_template('forecast.html')
+
+@app.route('/api/weather')
+def api_weather():
+    """
+    Renvoie la dernière météo enregistrée dans MongoDB (meteo_current).
+    """
+    try:
+        # On récupère le dernier document inséré
+        weather_data = col_weather_current.find_one(sort=[("scrape_timestamp", -1)], projection={"_id": 0})
+        if not weather_data:
+            return jsonify({"error": "No weather data found"}), 404
+            
+        # Enrichir avec description
+        code = weather_data.get('weathercode')
+        weather_data['description'] = get_weather_description(code)
+        
+        return jsonify(weather_data)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/forecast_stats', methods=['POST'])
+def api_forecast_stats():
+    """
+    Renvoie les prévisions de disponibilité des vélos basées sur la météo.
+    Pour l'instant, c'est une simulation ou une moyenne historique ajustée.
+    À terme, cela utilisera le modèle ML.
+    """
+    try:
+        req_data = request.get_json()
+        station_ids = req_data.get('station_ids', [])
+        
+        # 1. Récupérer les prévisions futures depuis meteo_forecast
+        now = datetime.now()
+        # On prend les prévisions à partir de maintenant + 48h
+        # Attention: 'time' dans la db est stocké en string ISO "YYYY-MM-DDTHH:MM" par open-meteo
+        # On va récupérer tout ce qui est >= now.isoformat() (approximatif mais ok pour string sort)
+        
+        cursor = col_weather_forecast.find({
+            "time": {"$gte": now.strftime("%Y-%m-%dT%H:00")}
+        }).sort("time", 1).limit(48)
+        
+        forecast_items = list(cursor)
+
+        # 2. Générer des données prévisionnelles
+        predictions = []
+        
+        if forecast_items:
+            for item in forecast_items:
+                t_str = item.get('time')
+                temp = item.get('temperature')
+                code = item.get('weathercode')
+                desc = get_weather_description(code)
+                
+                # Logique de disponibilité simplifiée
+                base_availability = 15
+                
+                # Codes pluie WMO simplifiés
+                rain_codes = [51, 53, 55, 61, 63, 65, 80, 81, 82, 95, 96, 99]
+                if code in rain_codes:
+                        base_availability += 5 
+                elif temp is not None and temp > 20: 
+                        base_availability -= 5
+
+                predictions.append({
+                    "time": t_str,
+                    "temp": temp,
+                    "weather_description": desc,
+                    "weather_code": code,
+                    "predicted_bikes": max(0, base_availability)
+                })
+             
+        else:
+            # Fallback
+            for i in range(0, 24, 3): 
+                future_time = now.replace(hour=i, minute=0, second=0, microsecond=0)
+                if future_time < now: future_time = future_time.replace(day=future_time.day + 1)
+                
+                predictions.append({
+                    "time": future_time.strftime("%Y-%m-%d %H:%M:%S"),
+                    "temp": 15,
+                    "weather_description": "Données simulées",
+                    "predicted_bikes": 10
+                })
+                
+        return jsonify({
+            "predictions": predictions
+        })
+
+    except Exception as e:
+        print(f"Error forecast stats: {e}")
+        return jsonify({"error": str(e)}), 500
 
 if __name__ == "__main__":
     app.run(host='0.0.0.0', port=5000, debug=True)

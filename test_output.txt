@@ -1,0 +1,8 @@
+﻿=== RUNNING DIAGNOSTIC TESTS ===
+
+[1/4] Testing OpenWeather API...
+[OK] Current weather fetched for Paris
+  -> Success! Temp: 14.28C, Desc: couvert
+
+[2/4] Testing MongoDB Connection...
+DEBUG: Attempting to connect to cluster0.wva85.mongodb.net/?appName=Cluster0

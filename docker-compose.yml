@@ -4,7 +4,7 @@ services:
   # CONFIG SERVER (configsvr)
   configsvr:
     image: mongo:6
-    command: ["mongod", "--configsvr", "--replSet", "rsConfig", "--port", "27019", "--bind_ip_all"]
+    command: [ "mongod", "--configsvr", "--replSet", "rsConfig", "--port", "27019", "--bind_ip_all" ]
     ports:
       - "27019:27019"
     volumes:
@@ -15,7 +15,7 @@ services:
   # SHARD 1 (rsShard1)
   shard1:
     image: mongo:6
-    command: ["mongod", "--shardsvr", "--replSet", "rsShard1", "--port", "27018", "--bind_ip_all"]
+    command: [ "mongod", "--shardsvr", "--replSet", "rsShard1", "--port", "27018", "--bind_ip_all" ]
     ports:
       - "27018:27018"
     volumes:
@@ -26,7 +26,7 @@ services:
   # SHARD 2 (rsShard2)
   shard2:
     image: mongo:6
-    command: ["mongod", "--shardsvr", "--replSet", "rsShard2", "--port", "27020", "--bind_ip_all"]
+    command: [ "mongod", "--shardsvr", "--replSet", "rsShard2", "--port", "27020", "--bind_ip_all" ]
     ports:
       - "27020:27020"
     volumes:
@@ -60,7 +60,7 @@ services:
       # CORRECTION ICI : On retire "- mongos" pour qu'il puisse démarrer AVANT le routeur
     volumes:
       - ./mongo-init:/mongo-init:ro
-    entrypoint: ["/bin/sh", "/mongo-init/mongo-setup.sh"]
+    entrypoint: [ "/bin/sh", "/mongo-init/mongo-setup.sh" ]
     networks:
       - mongo-cluster
 
@@ -71,6 +71,7 @@ services:
       - mongos
     environment:
       - MONGO_URI=mongodb://mongos:27017/velib
+      - MONGO_URI_CLOUD=${MONGO_URI_CLOUD:-}
       - OPENWEATHER_API_KEY=${OPENWEATHER_API_KEY:-}
     ports:
       - "5000:5000"
@@ -93,6 +94,21 @@ services:
     networks:
       - mongo-cluster
 
+  # WEATHER SCRAPER
+  weather-scraper:
+    build: ./scraper
+    command: [ "python", "weather_scraper.py" ]
+    depends_on:
+      - mongos
+    environment:
+      - MONGO_URI=mongodb://mongos:27017/velib
+      - MONGO_URI_CLOUD=${MONGO_URI_CLOUD:-}
+      - OPENWEATHER_API_KEY=${OPENWEATHER_API_KEY:-}
+    volumes:
+      - ./scraper:/app
+    networks:
+      - mongo-cluster
+
   # TRAINER
   trainer:
     build: ./trainer
@@ -109,6 +125,7 @@ volumes:
   configdb:
   shard1db:
   shard2db:
+
 
 networks:
   mongo-cluster:
