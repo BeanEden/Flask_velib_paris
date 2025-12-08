@@ -58,6 +58,7 @@
                     <li class="nav-item">
                         <a class="nav-link" href="/velib_list/">Liste</a>
                     </li>
+                    <li class="nav-item"><a class="nav-link" href="/model/">ML Dashboard</a></li>
                 </ul>
             </div>
         </div>
@@ -65,6 +66,22 @@
 
     <div class="container mt-4">
         <h1 class="mb-4">Prévisions Météo & Vélib</h1>
+
+        <!-- Search Bar -->
+        <div class="card mb-4 shadow-sm">
+            <div class="card-body">
+                <h5 class="card-title">Chercher une station</h5>
+                <div class="input-group">
+                    <input type="text" id="station-search" class="form-control"
+                        placeholder="Entrez le nom d'une station...">
+                    <button class="btn btn-primary" type="button" onclick="searchStation()">Rechercher</button>
+                    <button class="btn btn-secondary" type="button" onclick="resetSearch()">Voir Global</button>
+                </div>
+                <ul id="search-results" class="list-group mt-2"
+                    style="max-height: 200px; overflow-y: auto; display: none;"></ul>
+                <div id="selected-station-info" class="mt-2 text-success fw-bold"></div>
+            </div>
+        </div>
 
         <!-- Current Weather -->
         <div class="weather-card">
@@ -78,8 +95,8 @@
 
         <!-- Forecast Chart -->
         <div class="weather-card">
-            <h3>Prévisions de Disponibilité (Vélos)</h3>
-            <p class="text-muted">Estimation basée sur la météo et l'historique.</p>
+            <h3 id="chart-title">Prévisions de Disponibilité (Global)</h3>
+            <p class="text-muted">Estimation basée sur la météo et le modèle entraîné.</p>
             <div style="height: 400px;">
                 <canvas id="forecastChart"></canvas>
             </div>
@@ -88,16 +105,77 @@
 
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script>
+        let allStations = [];
+        let chartInstance = null;
+
+        // Load Stations for Search
+        fetch('/api/map_data')
+            .then(res => res.json())
+            .then(data => {
+                allStations = data;
+            })
+            .catch(err => console.error("Error loading stations:", err));
+
+        const searchInput = document.getElementById('station-search');
+        const resultsList = document.getElementById('search-results');
+
+        searchInput.addEventListener('input', function () {
+            const query = this.value.toLowerCase();
+            resultsList.innerHTML = '';
+
+            if (query.length < 2) {
+                resultsList.style.display = 'none';
+                return;
+            }
+
+            const matches = allStations.filter(s => s.name.toLowerCase().includes(query)).slice(0, 10);
+
+            if (matches.length > 0) {
+                resultsList.style.display = 'block';
+                matches.forEach(s => {
+                    const li = document.createElement('li');
+                    li.className = 'list-group-item list-group-item-action';
+                    li.textContent = s.name;
+                    li.style.cursor = 'pointer';
+                    li.onclick = () => selectStation(s);
+                    resultsList.appendChild(li);
+                });
+            } else {
+                resultsList.style.display = 'none';
+            }
+        });
+
+        function selectStation(station) {
+            document.getElementById('station-search').value = station.name;
+            resultsList.style.display = 'none';
+            document.getElementById('selected-station-info').textContent = "Station sélectionnée : " + station.name;
+            document.getElementById('chart-title').textContent = "Prévisions pour " + station.name;
+            loadForecast(station.station_id);
+        }
+
+        function resetSearch() {
+            document.getElementById('station-search').value = '';
+            resultsList.style.display = 'none';
+            document.getElementById('selected-station-info').textContent = "";
+            document.getElementById('chart-title').textContent = "Prévisions de Disponibilité (Global)";
+            loadForecast(null);
+        }
+
+        function searchStation() {
+            // Basic trigger if needed manually
+            const event = new Event('input');
+            searchInput.dispatchEvent(event);
+        }
+
         // 1. Fetch Weather Data
         fetch('/api/weather')
             .then(res => res.json())
             .then(data => {
-                // Format: data = { temperature, windspeed, weathercode, description, ... }
-                // Note: api_weather renvoie directement l'objet plat
                 const container = document.getElementById('current-weather');
+                const current = data;
 
-                if (!current || !current.temperature) {
-                    container.innerHTML = "Données non disponibles.";
+                if (!current || (!current.temperature && current.temperature !== 0)) {
+                    container.innerHTML = "Données météo non disponibles.";
                     return;
                 }
 
@@ -105,7 +183,6 @@
                 const wind = current.windspeed;
                 const desc = current.description || "Inconnu";
 
-                // Icon mapping
                 const getIcon = (c) => {
                     if (c === 0) return "☀️";
                     if (c <= 3) return "⛅";
@@ -130,103 +207,114 @@
             })
             .catch(err => console.error(err));
 
-        // 2. Fetch Forecast Stats
-        fetch('/api/forecast_stats', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ station_ids: [] }) // Global forecast
-        })
-            .then(res => res.json())
-            .then(data => {
-                const predictions = data.predictions;
-                if (!predictions || predictions.length === 0) return;
+        // 2. Load Forecast
+        function loadForecast(stationId) {
+            fetch('/api/forecast_stats', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ station_id: stationId })
+            })
+                .then(res => res.json())
+                .then(data => {
+                    updateChart(data.predictions);
+                })
+                .catch(err => console.error(err));
+        }
 
-                // Helper to get icon
-                const getIcon = (c) => {
-                    if (c === 0) return "☀️";
-                    if (c <= 3) return "⛅";
-                    if (c >= 45 && c <= 48) return "🌫️";
-                    if (c >= 51 && c <= 67) return "🌧️";
-                    if (c >= 71 && c <= 77) return "❄️";
-                    if (c >= 80) return "🌦️";
-                    if (c >= 95) return "⛈️";
-                    return "☁️";
-                };
+        function updateChart(predictions) {
+            if (!predictions || predictions.length === 0) return;
 
-                const labels = predictions.map(p => {
-                    const d = new Date(p.time);
-                    const dayStr = d.toLocaleDateString('fr-FR', { weekday: 'short', hour: '2-digit' });
-                    const icon = getIcon(p.weather_code);
-                    return `${dayStr} ${icon}`;
-                });
-                const temps = predictions.map(p => p.temp);
-                const bikes = predictions.map(p => p.predicted_bikes);
-                const winds = predictions.map(p => p.wind || 0);
+            const getIcon = (c) => {
+                if (c === 0) return "☀️";
+                if (c <= 3) return "⛅";
+                if (c >= 45 && c <= 48) return "🌫️";
+                if (c >= 51 && c <= 67) return "🌧️";
+                if (c >= 71 && c <= 77) return "❄️";
+                if (c >= 80) return "🌦️";
+                if (c >= 95) return "⛈️";
+                return "☁️";
+            };
 
-                const ctx = document.getElementById('forecastChart').getContext('2d');
-                new Chart(ctx, {
-                    type: 'line',
-                    data: {
-                        labels: labels,
-                        datasets: [
-                            {
-                                label: 'Vélos disponibles (Est.)',
-                                data: bikes,
-                                borderColor: 'rgba(40, 167, 69, 1)',
-                                backgroundColor: 'rgba(40, 167, 69, 0.2)',
-                                yAxisID: 'y',
-                                fill: true,
-                                tension: 0.4
-                            },
-                            {
-                                label: 'Température (°C)',
-                                data: temps,
-                                borderColor: 'rgba(255, 193, 7, 1)',
-                                backgroundColor: 'rgba(255, 193, 7, 0.2)',
-                                yAxisID: 'y1',
-                                borderDash: [5, 5],
-                                tension: 0.4
-                            },
-                            {
-                                label: 'Vent (km/h)',
-                                data: winds,
-                                borderColor: 'rgba(23, 162, 184, 1)',
-                                backgroundColor: 'rgba(23, 162, 184, 0.1)',
-                                yAxisID: 'y1', // Share axis with Temp (scales are close enough: 0-30 usually)
-                                borderDash: [2, 2],
-                                tension: 0.2,
-                                pointStyle: 'rectRot'
-                            }
-                        ]
-                    },
-                    options: {
-                        responsive: true,
-                        maintainAspectRatio: false,
-                        interaction: {
-                            mode: 'index',
-                            intersect: false,
+            const labels = predictions.map(p => {
+                const d = new Date(p.time);
+                const dayStr = d.toLocaleDateString('fr-FR', { weekday: 'short', hour: '2-digit' });
+                const icon = getIcon(p.weather_code);
+                return `${dayStr} ${icon}`;
+            });
+            const temps = predictions.map(p => p.temp);
+            const bikes = predictions.map(p => p.predicted_bikes);
+            const winds = predictions.map(p => p.wind || 0);
+
+            const ctx = document.getElementById('forecastChart').getContext('2d');
+
+            if (chartInstance) {
+                chartInstance.destroy();
+            }
+
+            chartInstance = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: labels,
+                    datasets: [
+                        {
+                            label: 'Vélos disponibles (Est.)',
+                            data: bikes,
+                            borderColor: 'rgba(40, 167, 69, 1)',
+                            backgroundColor: 'rgba(40, 167, 69, 0.2)',
+                            yAxisID: 'y',
+                            fill: true,
+                            tension: 0.4
                         },
-                        scales: {
-                            y: {
-                                type: 'linear',
-                                display: true,
-                                position: 'left',
-                                title: { display: true, text: 'Vélos' }
-                            },
-                            y1: {
-                                type: 'linear',
-                                display: true,
-                                position: 'right',
-                                grid: {
-                                    drawOnChartArea: false,
-                                },
-                                title: { display: true, text: 'Temp / Vent' }
-                            }
+                        {
+                            label: 'Température (°C)',
+                            data: temps,
+                            borderColor: 'rgba(255, 193, 7, 1)',
+                            backgroundColor: 'rgba(255, 193, 7, 0.2)',
+                            yAxisID: 'y1',
+                            borderDash: [5, 5],
+                            tension: 0.4
+                        },
+                        {
+                            label: 'Vent (km/h)',
+                            data: winds,
+                            borderColor: 'rgba(23, 162, 184, 1)',
+                            backgroundColor: 'rgba(23, 162, 184, 0.1)',
+                            yAxisID: 'y1',
+                            borderDash: [2, 2],
+                            tension: 0.2,
+                            pointStyle: 'rectRot'
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    interaction: {
+                        mode: 'index',
+                        intersect: false,
+                    },
+                    scales: {
+                        y: {
+                            type: 'linear',
+                            display: true,
+                            position: 'left',
+                            title: { display: true, text: 'Vélos' },
+                            min: 0
+                        },
+                        y1: {
+                            type: 'linear',
+                            display: true,
+                            position: 'right',
+                            grid: { drawOnChartArea: false },
+                            title: { display: true, text: 'Temp / Vent' }
                         }
                     }
-                });
-            })
-            .catch(err => console.error(err));
+                }
+            });
+        }
+
+        // Initial Load
+        loadForecast(null);
     </script>
 </body>
 

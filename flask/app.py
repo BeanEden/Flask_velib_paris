@@ -1,5 +1,6 @@
 import os
-from flask import Flask, render_template, jsonify
+import json
+from flask import Flask, render_template, jsonify, request, send_from_directory
 from pymongo import MongoClient
 from datetime import datetime, timezone
 from dotenv import load_dotenv
@@ -522,61 +523,128 @@ def api_weather():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+import joblib
+import pandas as pd
+import numpy as np
+
+# Load Model
+MODEL_PATH = "/models/velib_model.pkl"
+try:
+    model = joblib.load(MODEL_PATH)
+    print(f"Modèle chargé depuis {MODEL_PATH}")
+except Exception as e:
+    print(f"Erreur chargement modèle: {e}")
+    model = None
+
+@app.route('/model', strict_slashes=False)
+def model_dashboard():
+    print("Accessing /model dashboard")
+    metrics = {}
+    try:
+        with open("/models/metrics.json", "r") as f:
+            metrics = json.load(f)
+            print(f"Loaded metrics: {metrics}")
+    except Exception as e:
+        print(f"Error loading metrics: {e}")
+        metrics = {"error": "Modèle non entraîné ou fichier manquant.", "raw_error": str(e)}
+
+    return render_template('model.html', metrics=metrics)
+
+@app.route('/models_static/<path:filename>')
+def models_static(filename):
+    return send_from_directory('/models', filename)
+
 @app.route('/api/forecast_stats', methods=['POST'])
 def api_forecast_stats():
     """
-    Renvoie les prévisions de disponibilité des vélos basées sur la météo.
-    Pour l'instant, c'est une simulation ou une moyenne historique ajustée.
-    À terme, cela utilisera le modèle ML.
+    Renvoie les prévisions de disponibilité des vélos basées sur le modèle ML.
+    Gère la spécificité par station en pondérant par la capacité.
     """
     try:
         req_data = request.get_json()
-        station_ids = req_data.get('station_ids', [])
+        station_id = req_data.get('station_id') # Optional specific station
         
-        # 1. Récupérer les prévisions futures depuis meteo_forecast
+        # 1. Fetch Station Capacity if specific station requested
+        station_capacity = 30 # Default average capacity
+        station_name = "Global"
+        
+        if station_id:
+            try:
+                # Try to get station capacity from latest status or static info
+                # Here we fetch the latest status to get capacity = bikes + docks
+                stat = db.status.find_one({"station_id": station_id}, sort=[("scrape_timestamp", -1)])
+                if stat:
+                    station_capacity = stat.get('num_bikes_available', 0) + stat.get('num_docks_available', 0)
+                
+                # Fetch Name
+                st_info = db.stations.find_one({"_id": station_id})
+                if st_info: station_name = st_info.get('name', 'Station')
+            except Exception as e:
+                print(f"Warning fetching station info: {e}")
+
+        # 2. Récupérer les prévisions futures depuis meteo_forecast
         now = datetime.now()
-        # On prend les prévisions à partir de maintenant + 48h
-        # Attention: 'time' dans la db est stocké en string ISO "YYYY-MM-DDTHH:MM" par open-meteo
-        # On va récupérer tout ce qui est >= now.isoformat() (approximatif mais ok pour string sort)
-        
         cursor = col_weather_forecast.find({
             "time": {"$gte": now.strftime("%Y-%m-%dT%H:00")}
         }).sort("time", 1).limit(48)
         
         forecast_items = list(cursor)
-
-        # 2. Générer des données prévisionnelles
         predictions = []
         
-        if forecast_items:
+        if forecast_items and model:
+            # Prepare DataFrame for Model
+            rows = []
             for item in forecast_items:
                 t_str = item.get('time')
-                temp = item.get('temperature')
-                wind = item.get('windspeed') # Add wind
-                code = item.get('weathercode')
-                desc = get_weather_description(code)
+                dt = datetime.fromisoformat(t_str)
                 
-                # Logique de disponibilité simplifiée
-                base_availability = 15
+                row = {
+                    'hour': dt.hour,
+                    'day_of_week': dt.weekday(),
+                    'temperature': item.get('temperature', 15),
+                    'windspeed': item.get('windspeed', 10),
+                    'weathercode': item.get('weathercode', 0),
+                    # Meta info to keep for result
+                    '_time': t_str,
+                    '_desc': get_weather_description(item.get('weathercode', 0))
+                }
+                rows.append(row)
+            
+            df_pred = pd.DataFrame(rows)
+            
+            # Predict (Returns GLOBAL AVERAGE)
+            features = ['hour', 'day_of_week', 'temperature', 'windspeed', 'weathercode']
+            X = df_pred[features]
+            y_pred = model.predict(X)
+            
+            # Scale Factor: (Station Capacity / Avg Capacity of ~30)
+            # This makes big stations have big numbers, small stations have small numbers.
+            # We assume the model was trained on an average station of capacity ~30.
+            # If the model predicts 15 (50%), a 60-slot station should show 30.
+            scale_factor = station_capacity / 30.0
+            
+            # Format results
+            for i, row in enumerate(rows):
+                # Ensure non-negative and round
+                global_val = float(y_pred[i])
+                scaled_val = max(0, round(global_val * scale_factor))
                 
-                # Codes pluie WMO simplifiés
-                rain_codes = [51, 53, 55, 61, 63, 65, 80, 81, 82, 95, 96, 99]
-                if code in rain_codes:
-                        base_availability += 5 
-                elif temp is not None and temp > 20: 
-                        base_availability -= 5
-
+                # Clip to actual capacity if known
+                if station_id:
+                    scaled_val = min(scaled_val, station_capacity)
+                
                 predictions.append({
-                    "time": t_str,
-                    "temp": temp,
-                    "wind": wind,
-                    "weather_description": desc,
-                    "weather_code": code,
-                    "predicted_bikes": max(0, base_availability)
+                    "time": row['_time'],
+                    "temp": row['temperature'],
+                    "wind": row['windspeed'],
+                    "weather_description": row['_desc'],
+                    "weather_code": row['weathercode'],
+                    "predicted_bikes": scaled_val
                 })
-             
+                
         else:
-            # Fallback
+            # Fallback (Simulated or Error if critical)
+            print("Fallback forecast (No model or No data)")
             for i in range(0, 24, 3): 
                 future_time = now.replace(hour=i, minute=0, second=0, microsecond=0)
                 if future_time < now: future_time = future_time.replace(day=future_time.day + 1)
@@ -585,36 +653,19 @@ def api_forecast_stats():
                     "time": future_time.strftime("%Y-%m-%d %H:%M:%S"),
                     "temp": 15,
                     "wind": 10,
-                    "weather_description": "Données simulées",
+                    "weather_description": "Données simulées (Modèle HS)",
                     "predicted_bikes": 10
                 })
                 
         return jsonify({
-            "predictions": predictions
+            "predictions": predictions,
+            "station_id": station_id,
+            "station_capacity": station_capacity
         })
 
     except Exception as e:
         print(f"Error forecast stats: {e}")
         return jsonify({"error": str(e)}), 500
-
-import json
-from flask import send_from_directory
-
-@app.route('/model')
-def model_dashboard():
-    metrics = {}
-    try:
-        with open("/models/metrics.json", "r") as f:
-            metrics = json.load(f)
-    except Exception as e:
-        print(f"Error loading metrics: {e}")
-        metrics = {"error": "Modèle non entraîné ou fichier manquant."}
-
-    return render_template('model.html', metrics=metrics)
-
-@app.route('/models_static/<path:filename>')
-def models_static(filename):
-    return send_from_directory('/models', filename)
 
 if __name__ == "__main__":
     app.run(host='0.0.0.0', port=5000, debug=True)
