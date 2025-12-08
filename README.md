@@ -6,23 +6,32 @@ Ce projet est une application complète de **Big Data** et **Machine Learning** 
 
 1.  **Carte Interactive (Temps Réel)** :
     *   Visualisation de toutes les stations Vélib' sur une carte.
+    ![Image d'accueil](images/Accueil.png)
     *   Indicateurs de disponibilité (vert/orange/rouge) et popups détaillés.
+    ![Image Select](images/Select.png)
     *   Widget météo en temps réel (Température, Vent, Description).
     *   **Recherche d'itinéraire** : Trouve la station de départ (avec vélos) et d'arrivée (avec places) les plus proches.
+    ![Image Itineraire](images/Itineraire.png)
+
 
 2.  **Prévisions (Machine Learning)** :
     *   Tableau de bord des prévisions météo sur 48h.
-    *   **Prédiction d'affluence** : Estimation du nombre de vélos disponibles heure par heure, basée sur un modèle **XGBoost**.
+    *   **Prédiction d'affluence** : Estimation du nombre de vélos disponibles heure par heure, basée sur un modèle 
+    ![Image Forecast](images/Forecast.png)
+    **XGBoost**.
     *   Graphique interactif croisant disponibilité et conditions météo (Vent, Température).
+
+    ![Image Model](images/Model.png)
 
 3.  **Monitoring & Dashboard ML** :
     *   **Page Monitoring** : État du cluster MongoDB (Sharding), volumétrie des données, et fraîcheur des logs.
     *   **Dashboard ML** : Visualisation de la performance du modèle (R², RMSE), matrice de corrélation, et importance des variables (ex: Impact de la pluie sur l'utilisation).
+    ![Image Monitoring](images/Monitoring.png)
 
 ## 🛠️ Architecture Technique
 
 L'application est conteneurisée avec **Docker** et composée de plusieurs services :
-
+![Image Architecture](images/Architecture.png)
 *   **MongoDB Sharded Cluster** :
     *   `configsvr`, `shard1`, `shard2`, `mongos` (Router).
     *   Stockage distribué des données de stations (`velib.status`) et météo (`Meteo.meteo_current`).
